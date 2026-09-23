@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 工程设计说明（Design Notes） |
-| 版本 | v0.3（设计评审稿） |
-| 日期 | 2026-09-21 |
-| 上游依据 | `PRD.md` v1.0（含 ADR-6 / ADR-7） |
+| 版本 | v0.5（设计评审稿） |
+| 日期 | 2026-09-23 |
+| 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
 | 配套文档 | `docs/implementation-plan.md`（实施进度总表） |
-| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **30 条边 + 3 终态**——`SUCCESS` 不再是终态 |
+| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34` |
 
 ---
 
@@ -89,7 +89,9 @@ TomatoLite/
 | 接口 | 方法签名（节选） | OQ 挂载点 |
 |---|---|---|
 | `GitLabProvider` | `get_file(project, path, ref) -> FileInfo \| None`；`create_commit(project, branch, message, actions) -> CommitInfo`；`list_commits(project, path, since, per_page)` | — |
-| `JenkinsProvider` | `get_build(job, build_no) -> BuildInfo`；`get_queue_item(id) -> QueueInfo`；`trigger(job, params) -> queue_id`；`get_console_text(job, build_no) -> str`；`get_stages(job, build_no) -> list[StageInfo]` | — |
+| `JenkinsProvider` | `get_build(job, build_no) -> BuildInfo`；`get_queue_item(id) -> QueueInfo`；`trigger(job, params) -> queue_id`；`abort(job, build_no) -> bool`；`get_console_text(job, build_no) -> str`；`get_stages(job, build_no) -> list[StageInfo]` | — |
+
+> **`abort` 的口径（第四轮补，闭环 §7 遗留 2）**：对应 `POST /job/{job}/{n}/stop`（Mock 端点 §3.8 早已暴露）。当前唯一消费者是 `M2-34`（边 25 终止通道 A 单前 best-effort 停掉非终态构建）；构建已终态时 Jenkins 对 stop 的返回**不视为错误**，实现内判掉。通道 B 的对应物是 §2.6 的 `killpg`——两条通道"叫停"语义自此对称。
 | `K8sStateReader` | `get_workload(app, env) -> WorkloadState`；`list_pods(app, env) -> list[PodState]`；`get_restarts(pod) -> int` | **OQ-3**：`api_reader`（只读 SA）/ `kubectl_reader`（走 SshTransport 执行 kubectl）由 `settings.K8S_READER` 选择 |
 | `IMNotifier` | `send_confirm_card(ticket, view) -> msg_id`；`verify_signature(headers, body)`；`parse_action(body) -> FeedbackAction` | **OQ-4**：`wecom.py` / `dingtalk.py` 双实现 |
 
@@ -113,11 +115,31 @@ TomatoLite/
 | 分片 | 要点 |
 |---|---|
 | `base.py` | `django-environ` 读环境变量；**无任何密钥默认值** |
-| `local.py` | `DEBUG=True`；**强制 PostgreSQL**；`CHANNEL_LAYERS=InMemoryChannelLayer`；`INTEGRATION_MODE=mock`，base_url 指向假服务 |
+| `local.py` | `DEBUG=True`；**强制 PostgreSQL**（本地已装实例，§0.6a）；`CHANNEL_LAYERS=InMemoryChannelLayer`；`INTEGRATION_MODE` 三态——`mock`（默认，base_url 指向假服务）/ `integration`（指向 §0.6b 的临时真实实例，仅人工联调）/ 生产用 `prod.py`。业务代码对三态**零分支**，差异只在 base_url（§6 第 2 条） |
 | `test.py` | 真实 PG；`CHANNEL_LAYERS=InMemory`；`CELERY_TASK_ALWAYS_EAGER=True` 仅用于非并发测试 |
 | `prod.py` | `CHANNEL_LAYERS=RedisChannelLayer`；显式 `task_routes`；`CONN_MAX_AGE` 配 pgbouncer transaction 模式；`SECURE_*`、Sentry、JSON 结构化日志 |
 
 **为什么本地也强制 PG**：JSONB、部分唯一索引、`FOR UPDATE SKIP LOCKED`、事务级 advisory lock、`REVOKE UPDATE` 全部依赖 PostgreSQL。用 SQLite 会让迁移静默通过、运行期才炸；更糟的是**让 §1.4 的 append-only 测试变成永远通过的空测试**。
+
+### 0.6a 本地数据库（已装实例，非容器）
+
+PostgreSQL 使用**本地已安装的实例**（MacPorts），不进 `docker-compose`——`S0-3` 的 compose 清单只含 Redis7 + app + worker 组 + beat。
+
+| 项 | 口径 |
+|---|---|
+| 客户端 | `/opt/local/bin/psql14 -U postgres -d postgres`（运维/排查时手查事件表用的就是它，DoD 里出现 `psql14` 即指此路径） |
+| 开发库 | `DATABASE_URL=postgres://postgres@localhost:5432/tomatolite_dev` |
+| 测试库 | Django test runner 自动建 `test_tomatolite_*`，依赖 `postgres` 角色的 `CREATEDB`（superuser 默认具备，勿回收） |
+| **版本基线** | **≥ 14**。本文档使用的全部 PG 特性（JSONB / 部分唯一索引 / `FOR UPDATE SKIP LOCKED` / 事务级 advisory lock / `REVOKE UPDATE` / `Now()` 表达式）均为 9.x 时代特性，14 全兼容，已逐条核对 |
+| 基线纪律 | 引入 **15+/16-only 语法（如 `MERGE`、`uuidv7()`）前，必须先在本节上调基线并记入 §7**，否则本地全绿、生产按锁定的版本炸 |
+
+`S0-8` 的启动断言相应为：`connection.vendor == 'postgresql'` **且 `server_version >= 14`**。
+
+### 0.6b 本地临时联调栈（docker/compose）
+
+GitLab 与 Jenkins 在本地经 docker/compose **临时拉起**（`S0-9`，`docker-compose.integration.yml`），用于人工联调与里程碑演示：真实 push webhook、真实 notify 回调、真实凭据初始化。
+
+两条硬约束：**① 它是临时的**——实例可被随时销毁，任何 CI 用例、任何 `自动断言` DoD 不得依赖它（自动化基座永远是 §6 的 Mock 层）；**② 切换只动 base_url**——`INTEGRATION_MODE=integration` 仅用于前端角标提示"当前连着临时真实实例"，业务代码零分支（§6 第 2 条）。
 
 ### 0.7 测试基础设施的一个陷阱
 
@@ -249,7 +271,7 @@ TRANSITIONS: dict[str, Transition] = {...}   # 纯数据，可单元测试
 | 7 | `APPROVED` | `TRIGGER_START` | `EXECUTING` | **调度器**（唯一晋升者）/ 人工立即执行 | ✅ | **D-2 修正后的唯一入口**。取 `AppEnvLock`；抢不到 → 留在 `APPROVED` 并写 `tl_ticket_queue`，不得报错 |
 | 8 | `APPROVED` | `TRIGGER_CANCEL` | `CANCELLED` | 用户 | — | |
 | 9 | `EXECUTING` | `TRIGGER_EXEC_FINISHED` | `VERIFYING` | 系统 | ✅ | 代提交 + 构建成功，进入验证 |
-| 10 | `EXECUTING` | `TRIGGER_SUBMIT_FAILED` | `PAUSED` | 系统 | ✅ | **代提交永久失败（GitLab 不可达/5xx）**。`payload.reason_class=INFRA`，出口为"重试提交"（边 20）而非回滚 |
+| 10 | `EXECUTING` | `TRIGGER_SUBMIT_FAILED` | `PAUSED` | 系统 | ✅ | **代提交永久失败（GitLab 不可达/5xx）**。`payload.reason_class=INFRA`，出口为"重试提交"（边 24）而非回滚 |
 | 11 | `EXECUTING` | `TRIGGER_MANIFEST_CONFLICT` | `PAUSED` | 系统 | ✅ | 清单已存在且内容哈希不匹配（`MANIFEST_CONFLICT` / `MANIFEST_TAMPERED`）。必须人工判断是接受既有文件还是终止 |
 | 12 | `EXECUTING` | `TRIGGER_RUN_ORPHANED` | `PAUSED` | 系统 | ✅ | §2.7① 孤儿执行；**绝不自动重跑** |
 | 13 | `EXECUTING` | `TRIGGER_INVENTORY_STALE` | `PAUSED` | 系统 | ✅ | §2.7③ `STALE_INVENTORY`，要求重新审批 |
@@ -270,6 +292,7 @@ TRANSITIONS: dict[str, Transition] = {...}   # 纯数据，可单元测试
 | 28 | **任意持有态** | `TRIGGER_LEASE_LOST` | `PAUSED` | 系统（watchdog） | — | §1.6。写 `LEASE_LOST` 事件并记录 `from_state` |
 | 29 | `VERIFY_FAILED` | `TRIGGER_FORCE_RELEASE` | `CONFIRMING` | 用户（≥ 审批人级别） | ✅ | **人工强制放行**：验证不过但业务判定可接受。`guard_force_release_authorized` + `guard_force_release_reason`。必须写 `FORCE_RELEASED` 事件，见下方说明 |
 | 30 | `SUCCESS` | `TRIGGER_POST_HOC_ROLLBACK` | `ROLLBACK` | 用户（≥ 审批人级别） | ✅ | **事后回滚**：已闭环后发现线上问题。`guard_post_hoc_rollback_authorized` + `guard_target_version_confirmed`。**抢不到锁当场拒绝，不入队**，见下方说明 |
+| 31 | `EXECUTING` | `TRIGGER_BUILD_LOST` | `PAUSED` | 系统（sweeper） | ✅ | §3.6 触发兜底：`queue_id` 存在但 `build_no` 一直不出现，且队列项已 `cancelled`/消失。**绝不猜 `build_no`**。`payload.reason_class=INFRA`；恢复出口同边 10 走**边 24**，但动作是"重新触发构建"。系补录（见下方"边 31 的完整约束"） |
 
 **终态（3 个，无出边）**：`REJECTED` / `ROLLED_BACK` / `CANCELLED`。
 
@@ -305,6 +328,18 @@ TRANSITIONS: dict[str, Transition] = {...}   # 纯数据，可单元测试
 > 把人工动作塞进自动队列反而制造一种新的静默失败——操作者以为回滚已经在路上，实际它排在某个看不见的队列里。**同一个教训不需要踩第二次。**
 >
 > 这个选择还有个附带好处：`dispatch_queued`（`M1-10b`）不必泛化成"按意图晋升到不同目标态"，队列语义保持单一（只服务 `APPROVED → EXECUTING`）。
+
+#### 边 31 的完整约束（`TRIGGER_BUILD_LOST`，补录）
+
+这条边从初版起就被 §3.6 的代码片段与正文两处引用，却**从未登记进本表**——违反本表自己的规则"任何新增边必须先改这张表"。若拖到开工后发现，写 sweeper 的人要实现一个表里不存在的触发器，而 `M1-09` 的"表↔代码逐行一致"断言必然失败。第四轮开工前盘查发现并补录；**语义完全收编 §3.6 既有文字，不引入任何新设计**。编号按登记顺序取 31，不插号重排（边 29/30 同理——编号是 ID，不是序）。
+
+| 约束 | 内容 |
+|---|---|
+| 判定权 | 唯一判定者是 sweeper 的 `GET /queue/item/{id}/api/json`：`cancelled` 或队列项消失（404）才走本边。**平台绝不能自己猜 `build_no`**（§3.6 原文——队列语义下猜错就把别人的构建当成自己的） |
+| 落位 | `PAUSED`，`payload.reason_class=INFRA`——沿用边 10–14 家族惯例：`EXECUTING` 侧的系统类失败一律落 `PAUSED`，把"还救不救"留给人 |
+| 恢复出口 | 走边 24，`paused_from_state=EXECUTING`；但恢复动作是**重新触发构建**而非重新代提交——清单已在仓库里，重放提交必被 §4.2 幂等守卫去重。恢复 effect 直指 `JenkinsProvider.trigger`，不走代提交路径 |
+| 终止兜底 | 从本边进 `PAUSED` 的通道 A 单若被边 25 终止（`M2-34`），Jenkins 侧构建可能仍以 `PENDING` 挂在队列或已消失——`abort` 为 best-effort，失败不阻塞终止 |
+| 审计 | 写 `BUILD_LOST` 事件，payload 记 `queue_id`、判定依据（队列项 `cancelled` / 404）、从 `trigger` 到判定的耗时（队列积压的信号） |
 
 > **`PAUSED` 必须记住来源态。** 边 24 的目标是"来源态"而非某个固定状态：从 `EXECUTING` 暂停的单据恢复后必须回到 `EXECUTING`，从 `VERIFYING` 暂停的必须回到 `VERIFYING`。这是当前 14 态设计里唯一一处"状态不可自解释"的地方——`PAUSED` 本身不携带阶段信息，否则会出现"一个只跑到一半的发布被恢复到验证阶段"这种幽灵流转。
 >
@@ -1207,9 +1242,11 @@ def evaluate(run: VerificationRun) -> Conclusion:
 
 4. **假服务必须自带 `_control` 与故障注入**，且必须能构造"落库成功但响应超时""webhook 早于 API 响应"这两类时序——它们分别是 §4.2 幂等守卫与 §4.4 关联逻辑的**唯一有效测试手段**。
 
-5. **本地也强制 PostgreSQL**（见 §0.6）。
+5. **本地也强制 PostgreSQL**（见 §0.6）——用本地已装实例（≥14，非容器），见 §0.6a。
 
 6. **并发测试用 `TransactionTestCase` + 真实线程**（见 §0.7）。
+
+7. **双层环境：真实实例管"假设对不对"，Mock 管"坏情况下不撒谎"。** 本地 docker/compose 临时拉起的真实 GitLab + Jenkins（§0.6b、`S0-9`）验证**我们对真系统的假设是对的**——真实 webhook 载荷形状、真实 notify 签名行为、凭据初始化流程；Mock 层（`S0-6a/b/c`）验证**系统在坏情况下不撒谎**——`callback_drop_rate`、落库超时、webhook 抢跑，这些时序真实系统构造不出来，且临时实例随时可被销毁。**分界线：里程碑验收项在 Mock 链路跑（可重复、可断言），另用真实实例各人工走一遍（`人工观察`）；两次都过才算过。任何 CI 用例不得依赖真实实例。**
 
 ---
 
@@ -1234,7 +1271,7 @@ def evaluate(run: VerificationRun) -> Conclusion:
 | **A-2** | 探活"连接类"超时判 `FAIL`，会让平台网络抖动批量误报 `VERIFY_FAILED` 并弹出回滚入口——与 OQ-9 要防的是同一件事，只是换了条路径 | ✅ **用户拍板：全目标连接类失败 → `ERROR`**（部分失败仍判 `FAIL`） | §5.4.1（新增小节）、§5.3 `error_class`、§5.5 表、`M2-11`/`M2-12` |
 | **A-3** | 验签失败也返回 200 并落库，等于给了一个**无需认证即可灌满 `tl_callback_log`** 的磁盘耗尽路径 | ✅ **用户拍板：401 且不落库**，审计走应用日志 + 独立计数器；`signature_ok` 字段删除 | §3.3、§3.1 `CallbackLog` |
 | **A-4** | 实施计划的人天估算对 AI coding 无意义，但它承担的"这件事更难"的信号会一起丢掉 | ✅ **用户拍板：换成 风险等级 `L1/L2/L3` + 验证强度 三值**。并要求"自动断言"类任务的 DoD 必须是 AI 能自己跑的判定命令 | `implementation-plan.md` |
-| **A-5** | 权威迁移表不存在——触发器名字散落在 §2–§5 的散文与代码里，且已开始互相打架（正是 A-1 的成因）。另有 `PAUSED` 无出口、旁路单"直接进 `EXECUTING`"与"`apply()` 是唯一写 `state` 的函数"冲突 | ⚠️ **按审计建议落地**：新增 §1.3.1 完整迁移表；旁路单改为"先 `DRAFT` 再 `apply()`"，同事务内完成。**第三轮补全**：两条曾留白的边已由产品拍板（边 29 / 30），现为 **30 条边 + 3 终态** | §1.3.1、§4.4 L3、§1.2 `paused_from_state` |
+| **A-5** | 权威迁移表不存在——触发器名字散落在 §2–§5 的散文与代码里，且已开始互相打架（正是 A-1 的成因）。另有 `PAUSED` 无出口、旁路单"直接进 `EXECUTING`"与"`apply()` 是唯一写 `state` 的函数"冲突 | ⚠️ **按审计建议落地**：新增 §1.3.1 完整迁移表；旁路单改为"先 `DRAFT` 再 `apply()`"，同事务内完成。**第三轮补全**：两条曾留白的边已由产品拍板（边 29 / 30）。**第四轮补录**：边 31 `TRIGGER_BUILD_LOST`（漏登表，见 §7 第四轮）。现为 **31 条边 + 3 终态** | §1.3.1、§4.4 L3、§1.2 `paused_from_state` |
 | **A-6** | `PipelineRun` 的 `commit_sha` 唯一性在 §3.1 与 §4.3 互相矛盾；单列唯一还会让**回滚单建不出来** | ⚠️ **按审计建议落地**：以 `(ticket, commit_sha)` 复合为准 | §3.1、§3.4 规则 3、§4.3 |
 | **A-7** | `ConcurrencySlot` 三处缺陷：`app:{id}` 作用域无法被 seed 迁移预置（**新应用的作业永远排不出去且不报错**）；`scope IN (...) LIMIT 1` 让"全局+单应用"双限制失效；与 Celery 并发数的关系未定义 | ⚠️ **按审计建议落地**：按需创建 + 双 scope 全有或全无 + 启动断言 | §2.2 |
 
@@ -1252,7 +1289,7 @@ def evaluate(run: VerificationRun) -> Conclusion:
 **遗留（本轮未处理，需产品确认后再定）**：
 
 1. ~~`VERIFY_FAILED → CONFIRMING`（人工强制放行）与 `SUCCESS → ROLLBACK`（事后回滚）两条边刻意留白~~ → ✅ **已于 2026-09-21 拍板：两条都开**，见 §1.3.1 边 29 / 边 30 与配套守卫、字段、度量。
-2. **`JenkinsProvider` 缺 abort 接口**：Mock 暴露了 `POST /job/{job}/{n}/stop`（§3.8），但 §0.4 的接口清单里没有对应方法，也没有任何任务负责调用它——**通道 A 的超时/取消路径缺一条腿**（通道 B 有 §2.6 L3 的 `killpg` 对应）。这是一处真实缺口，建议下一轮处理。
+2. ~~**`JenkinsProvider` 缺 abort 接口**：Mock 暴露了 `POST /job/{job}/{n}/stop`（§3.8），但 §0.4 的接口清单里没有对应方法，也没有任何任务负责调用它~~ → ✅ **已于第四轮闭环**：§0.4 补 `abort(job, build_no)` 方法行，消费者落为任务 `M2-34`（边 25 终止前 best-effort 叫停，失败不阻塞、落 warn 事件）。
 
 ### 第三轮（2026-09-21）：两条留白边拍板开放
 
@@ -1307,3 +1344,18 @@ def evaluate(run: VerificationRun) -> Conclusion:
 6. UI（PRD §10）需为该状态补一个番茄标识——`VERIFY_FAILED` 是"虫眼"，`VERIFICATION_ERROR` 是"平台看不清"，两者不能共用图标（`X-03`）。
 
 **遗留的一处权衡**：新增状态使状态机从 13 态变为 14 态，`TRANSITIONS` 的合法边测试用例相应增加。这是可接受的代价——状态机是纯数据，测试成本低于在生产上误判一次回滚。
+
+### 第四轮（2026-09-23）：开工前缺口盘查
+
+产品宣布准备开始编码，本轮对两份文档做最后一次一致性盘查——只查"会不会让第一天写代码的人踩空"，不做新设计。发现并处理四处：
+
+| # | 缺口 | 处理 |
+|---|---|---|
+| G-1 | **边 31 漏登表**：`TRIGGER_BUILD_LOST` 在 §3.6 代码片段与正文两处使用，权威迁移表却没有这条边——违反表自己的"先改表"纪律；`M1-09` 的逐行一致断言与 sweeper 实现必有一方落空 | §1.3.1 补录边 31 + "边 31 的完整约束"小节。语义全部收编 §3.6 既有文字，零新增设计 |
+| G-2 | **边 10 陈旧引用**：说明里"出口为重试提交（边 20）"——边 20 在第三轮重排后是 `VERIFY_FAILED→PAUSED`，正确恢复出口是**边 24** | 改引边 24。教训：**编号是 ID 不是序**，重排表时所有正文引用都要过一遍 |
+| G-3 | **边 25 无主 + 遗留 2 未闭环**：`TRIGGER_TERMINATE` 在实施计划中无任何任务落地；`JenkinsProvider.abort` 缺口挂着"下一轮"两轮了——而边 25 恰是 abort 的唯一合法消费者 | 两个同源缺口一次闭环：§0.4 补 `abort` 方法行，实施计划新增任务 `M2-34` |
+| G-4 | **密钥无出处**：`base.py` 规定"无任何密钥默认值"，但没有任何交付物说明本地变量从哪来；仓库连 `.gitignore` 都没有——第一次提交就有把 `.env` 带进 git 历史的现实风险 | 实施计划 `S0-3` 交付物追加 `.env.example`（全部必需变量占位）与 `.gitignore`，DoD 补"`git status` 不出现 `.env`" |
+
+**盘查中确认不需要处理的**：① 剩余 5 项 OQ 均有"抽象先行"临时打法，不在关键路径；② Mock/真实双层环境口径 v0.4/v0.6 已闭环；③ **本仓 CI 暂不加任务**——托管平台未定（现为本地 git），`S0-7` 的 pre-commit + pytest 本地门即当前权威验证门；将来落到 GitLab/GitHub 托管时再在变更记录里补一条任务，避免为一个还不存在的平台写流水线定义；④ `docs/spikes/` 目录随 `S0-1` 交付自然创建，无需预留。
+
+本轮后设计文档进入**冻结观察**状态：开发期只允许"发现文档与实现冲突时按 `/spec` 的 Hard Stop 流程修订"，不允许顺手改设计。

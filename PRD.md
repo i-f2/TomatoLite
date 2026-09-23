@@ -267,6 +267,8 @@ commit message: [TL-20260917-001] RELEASE app=order-center env=prod version=v1.2
 
 ## 6. 数据模型
 
+> **本节仅为概览。** 工程级字段、约束与索引的**完整定义以 `docs/design-notes.md` §1.2（模型）/ §1.3.1（权威迁移表）/ §1.4–§1.7（事件表与锁）为准**——两边不一致时，design-notes 为准，本节有意不随工程细节演进。
+>
 > 日志本体存磁盘（按单据归档目录），PG 存路径 + 尾部摘要；JSONB 用于一切结构化快照。
 
 ```sql
