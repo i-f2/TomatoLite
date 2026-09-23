@@ -1,0 +1,5 @@
+[local]
+localhost ansible_connection=local
+
+[blackhole]
+192.0.2.1 ansible_connection=ssh ansible_user=probe ansible_ssh_common_args="-o ConnectTimeout=3 -o StrictHostKeyChecking=no"

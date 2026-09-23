@@ -1,0 +1,62 @@
+{
+  "main": {
+    "ident": "main",
+    "playbook": "playbook.yml",
+    "runner_status": "failed",
+    "rc": 4,
+    "cancel_callback_invocations": 3,
+    "elapsed_s": 11.93,
+    "total_events": 41,
+    "events_per_s": 3.4,
+    "event_kind_counts": {
+      "playbook_on_start": 1,
+      "playbook_on_play_start": 2,
+      "playbook_on_task_start": 11,
+      "runner_on_start": 11,
+      "verbose": 1,
+      "runner_on_ok": 6,
+      "runner_on_skipped": 1,
+      "runner_on_failed": 3,
+      "runner_item_on_ok": 3,
+      "runner_on_unreachable": 1,
+      "playbook_on_stats": 1
+    },
+    "handler_thread_names": {
+      "MainThread": 41
+    },
+    "artifact_dir": "/Users/denny/Documents/Code/TomatoLite/docs/spikes/s0-1/artifacts/main",
+    "versions": {
+      "python": "3.12.13",
+      "ansible-runner": "2.4.3",
+      "ansible-core": "ansible-playbook [core 2.21.4]"
+    }
+  },
+  "stress": {
+    "ident": "stress",
+    "playbook": "stress.yml",
+    "runner_status": "successful",
+    "rc": 0,
+    "cancel_callback_invocations": 2,
+    "elapsed_s": 9.102,
+    "total_events": 5006,
+    "events_per_s": 550.0,
+    "event_kind_counts": {
+      "playbook_on_start": 1,
+      "playbook_on_play_start": 1,
+      "playbook_on_task_start": 1,
+      "runner_on_start": 1,
+      "runner_item_on_ok": 5000,
+      "runner_on_ok": 1,
+      "playbook_on_stats": 1
+    },
+    "handler_thread_names": {
+      "MainThread": 5006
+    },
+    "artifact_dir": "/Users/denny/Documents/Code/TomatoLite/docs/spikes/s0-1/artifacts/stress",
+    "versions": {
+      "python": "3.12.13",
+      "ansible-runner": "2.4.3",
+      "ansible-core": "ansible-playbook [core 2.21.4]"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+---
+# S0-1 spike：一次性覆盖 §2.3 假设需要验证的六类结局
+# changed / ok / skipped(when:false) / failed(ignore_errors) / rescued(block+rescue)
+# / loop item / unreachable（黑洞主机，ConnectTimeout=3 封顶）
+- name: S0-1 outcomes play
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    workdir: "{{ playbook_dir }}/../work"
+  tasks:
+    - name: T0 ensure workdir (changed first run)
+      ansible.builtin.file:
+        path: "{{ workdir }}"
+        state: directory
+
+    - name: T1 changed create version file
+      ansible.builtin.copy:
+        dest: "{{ workdir }}/release.txt"
+        content: "build={{ now() }}\n"
+        mode: "0644"
+
+    - name: T2 ok (stat, never changed)
+      ansible.builtin.stat:
+        path: "{{ workdir }}/release.txt"
+      register: st
+
+    - name: T3 skipped by when false
+      ansible.builtin.debug:
+        msg: "never runs"
+      when: false
+
+    - name: T4 failed but ignore_errors
+      ansible.builtin.command:
+        cmd: /usr/bin/false
+      ignore_errors: true
+
+    - name: T5a doomed task inside block (rescued)
+      ansible.builtin.command:
+        cmd: "/bin/sh -c 'echo oops-out; echo oops-err >&2; exit 3'"
+      register: boom
+      ignore_errors: true
+
+    - name: T5b rescue branch
+      block:
+        - name: T5b1 raise
+          ansible.builtin.fail:
+            msg: "forced failure -> rescue"
+      rescue:
+        - name: T5b2 handled
+          ansible.builtin.debug:
+            msg: "rescued from: {{ boom.rc | default('n/a') }}"
+
+    - name: T6 loop over three items
+      ansible.builtin.debug:
+        msg: "item={{ item }}"
+      loop:
+        - alpha
+        - beta
+        - gamma
+
+    - name: T7 multiline stdout task
+      ansible.builtin.command:
+        cmd: "/bin/sh -c 'printf line1\\nline2\\nline3\\n'"
+      changed_when: false
+
+- name: S0-1 unreachable play
+  hosts: blackhole
+  gather_facts: false
+  tasks:
+    - name: T8 ping blackhole
+      ansible.builtin.ping:

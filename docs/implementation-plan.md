@@ -3,10 +3,10 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 实施进度总表（任务台账） |
-| 版本 | v0.7 |
+| 版本 | v0.8 |
 | 日期 | 2026-09-23 |
 | 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
-| 配套文档 | `docs/design-notes.md` v0.5（工程设计说明） |
+| 配套文档 | `docs/design-notes.md` v0.6（工程设计说明） |
 | 任务数 | 101（不含 8 条里程碑验收项） |
 | 风险分布 | L3×25 / L2×24 / L1×52 |
 | 验证分布 | 自动断言×83 / 故障注入×8 / 人工观察×10 |
@@ -119,7 +119,7 @@ M3  度量 + 报告 + 定时作业                8 任务   L3×0
 
 | ID | 任务 | 依赖 | 风险 | 验证强度 | 验收方式 |
 |---|---|---|---|---|---|
-| S0-1 | **ansible-runner 事件流 spike**：本地跑通一个 playbook，抓取 `runner_on_ok/failed/skipped`、`playbook_on_task_start` 等事件原始结构与字段 | — | L1 | 自动断言 | spike 报告 + 事件样例 JSON 落 `docs/spikes/` |
+| S0-1 | **ansible-runner 事件流 spike**：本地跑通一个 playbook，抓取 `runner_on_ok/failed/skipped`、`playbook_on_task_start` 等事件原始结构与字段 | — | L1 | 自动断言 | spike 报告 + 事件样例 JSON 落 `docs/spikes/`。**✅ 已完成（2026-09-23），报告 `docs/spikes/s0-1/report.md`——5 项假设修订待拍板（F-1~F-5）** |
 | S0-2 | **Celery + Channels 事件桥接 spike**：验证 runner 事件在 prefork worker 内如何推至 Redis channel layer 的 WebSocket group；验证 flush/buffering 行为 | S0-1 | L1 | 自动断言 | 最小 demo：浏览器实时看到逐行输出 |
 | S0-3 | **工程骨架**：`docker-compose`（Redis7 + app + **按队列拆分的 worker 组** + beat；**PG 不进 compose**，用本地已装实例，最低版本 **14**，口径见 `design-notes.md` §0.6a）、Django 项目、settings 分片（base/local/test/prod）、DRF、drf-spectacular、Celery、Channels、pytest-django。**密钥交付物（第四轮补）**：`.env.example` 列出全部必需变量占位（DB/Redis/HMAC key/GitLab token/S0-9 凭据位），仓库根 `.gitignore` 至少含 `.env`、`var/`、`__pycache__`、`node_modules`——`base.py` 无密钥默认值（§0.6），不交付模板等于逼使用者把真密钥写进受版本控制的文件 | — | L1 | 自动断言 | `docker compose up` 起服务；`/api/schema/` 可访问；**`cp .env.example .env` 后 `manage.py check` 通过**；`git status` 不出现 `.env` |
 | S0-3a | **队列与 worker 拓扑**：按 `callback.process / exec.runner / verify.runner / sweeper+notify+default` 拆池；`exec.runner` 必须 `--prefetch-multiplier=1`；beat **单实例**（依据 §0.5） | S0-3 | L2 | 故障注入 | 压测确认：并发上限 3 时同时最多 3 个 runner 在跑（默认 prefetch=4 会放大到 12） |
@@ -171,9 +171,9 @@ M3  度量 + 报告 + 定时作业                8 任务   L3×0
 |---|---|---|---|---|---|
 | M1-13 | **`tl_ansible_run` / `tl_ansible_task` 模型** | S0-4 | L2 | 自动断言 | migrate 通过 |
 | M1-14 | **GitLab shallow pull 剧本**：临时目录拉取并解析 `resolved_commit_sha`，平台不存剧本副本 | S0-6a | L1 | 故障注入 | 单测：拉取后无残留副本；GitLab 不可达时报错清晰 |
-| M1-15 | **ansible-runner 执行器 + 事件泵**：`run_async` + 白名单事件归一化 → Redis LPUSH/PUBLISH → Persister 线程批量 upsert（§2.3） | S0-1, S0-2, M1-13 | L2 | 自动断言 | 本地跑通 demo playbook，事件完整入库；**断言 `event_handler` 内无同步 INSERT** |
+| M1-15 | **ansible-runner 执行器 + 事件泵**：`run_async` + 白名单事件归一化 → Redis LPUSH/PUBLISH → Persister 线程批量 upsert（§2.3，**白名单含 `runner_item_on_*` 族、`seq` 复用 payload.counter、RESCUED 走终态计数回填 ③′**——均系 S0-1 实据修订） | S0-1 ✅, S0-2, M1-13 | L2 | 自动断言 | 本地跑通 demo playbook，事件完整入库；**断言 `event_handler` 内无同步 INSERT**；**断言 rescued 对账：`n == stats.rescued+stats.failures` 时逐条判对，不等时全判 FAILED 且产生告警事件** |
 | M1-16 | **事件流 → WebSocket（三层防洪水）**：① 分层——WS 只发状态迁移，全文落 artifact 文件懒加载 ② 合并——`LogCoalescer` 50 行/100ms 一帧 ③ 限流——超阈值只发计数帧。Consumer `connect()` 内校验 ticket 可见性（§2.4） | M1-15 | L2 | 故障注入 | 压测：200 主机 × 100 task 下 WebSocket 不崩、DB 写入不阻塞 ansible 输出；**未授权用户订阅被拒** |
-| M1-17 | **task × host 结果汇总**：状态、耗时、changed、stdout/stderr 摘要 | M1-15 | L1 | 自动断言 | 与 ansible-runner 原始事件逐条比对一致 |
+| M1-17 | **task × host 结果汇总**：状态、耗时、changed、stdout/stderr 摘要（S0-1 实据：item 行 `duration_ms=NULL`；stderr 列自 `res.msg/exception`+stdout 剥 ANSI 提取，事件无独立字段） | M1-15 | L1 | 自动断言 | 与 ansible-runner 原始事件逐条比对一致（样例基线 `docs/spikes/s0-1/samples/`） |
 | M1-18 | **并发度限制**：DB 信号量表 `tl_concurrency_slot`（`FOR UPDATE SKIP LOCKED` 抢占，带租约），全局 + 单应用双 scope——**双 scope 是全等于语义**：两次 `SELECT ... FOR UPDATE SKIP LOCKED` 必须都成功，任一失败即整体释放，**不允许只拿一半**。槽位行**按需创建**（应用是运行时建的，不能预置）；Celery 并发数由启动断言钉死为 `槽位数 + 1`。未拿到 → 写回 `QUEUED` 由 beat 重扫，**不用 `self.retry()`**（会占满预取位）（§2.2） | M1-15 | L3 | 自动断言 | 单测：超出并发度的作业排队而非并行；只拿到单 scope 时整体释放；worker 重启后槽位可回收；**启动时并发数 ≠ 槽位+1 直接失败** |
 | M1-18a | **验证槽位预留（防分布式死锁）**：`scope="verify"` 独立命名空间并保留固定配额（默认 8）（§5.6） | M1-18 | L3 | 自动断言 | 单测：ansible 作业占满全局槽位时，验证仍能获得槽位推进 |
 | M1-19 | **超时控制与强制终止（三层）**：① `run_async(timeout=)` ② stall watchdog（`last_event_at`）③ `os.killpg` 杀**进程组**（§2.6） | M1-15 | L3 | 故障注入 | 单测：超时 playbook 被终止、**无孤儿 ssh 残留**、单据状态正确 |
@@ -390,3 +390,4 @@ M3  度量 + 报告 + 定时作业                8 任务   L3×0
 | v0.5 | **两条留白边拍板开放**（`design-notes.md` §7 第三轮）：<br>· **边 29 `VERIFY_FAILED → CONFIRMING` 人工强制放行**（ADR-10）：新增 `M2-27a`（L3）——权限 ≥ 审批人且非发起人、理由必填、同事务写 `FORCE_RELEASED`；`M1-09` 守卫用例、`X-03` 加"人工放行"角标、`M3-01` 加强制放行率<br>· **边 30 `SUCCESS → ROLLBACK` 事后回滚**（ADR-11）：新增 `M2-28a`（L3）——必须显式传 `target_version`、抢不到锁返回 409 **不入队**；**`SUCCESS` 不再是终态**（4→3），`M3-01` 改为按最终态统计，`M2-27` 上调 L2<br>· **两处隐藏冲突已一并处理**：① `guard_no_skip_verifying` 原要求最新结论为 `PASS`，会让强制放行进来的单被自己的守卫卡死在 `CONFIRMING`，现放宽为"`PASS` **或** `force_released_at` 非空"；② 新增守卫与 `VERIFICATION_ERROR` 出口守卫**长得像但语义相反，明令不得复用**<br>· `Ticket` 新增 `force_released_at / force_released_by / force_release_reason` 三字段<br>· 任务数 97→**99**；风险分布 L3×23→**25**、L2×20→**23**、L1×54→**51**；验证强度分布不变<br>· 同步修复 `PRD.md` 的 Markdown 围栏错配（外层 ```` ```markdown ```` 包裹全文导致 §8~§12 渲染为代码块）并删除文末残留的生成对话文字；新增 ADR-10 / ADR-11、FR-RB-05/06、FR-SEC-05、UI 放行角标<br>· `PRD.md` §9 的 M2 交付内容与 DoD 补入两条新能力（新增 DoD ④），M3 度量补 `强制放行率`；**并删除 §9 的「周期」列**（原 M1 4~6 周 / M2 6~8 周 / M3 8 周），改为明示「串行推进，顺序固定 M1 → M2 → M3，不承诺日期、不估工期」，与本表「不估人天 / 不排工期」的立场对齐；本表新增 `M2-A4` / `M2-A5`（里程碑验收项 6→**8**） |
 | v0.6 | **本地开发环境实况落账**（用户提供的两项环境事实，改文档不动环境）：<br>· 前提表「联调环境」行改写为**双层**——本地 docker/compose 临时拉起真实 GitLab + Jenkins 做人工联调；自动化断言与故障注入仍以 Mock 层为准，**`S0-6a/b/c` 不解除**（`callback_drop_rate`、落库超时、webhook 抢跑三类时序真实系统构造不出来；临时实例不得被 CI 依赖）。分界线落为 `design-notes.md` §6 第 7 条："真实例验证假设对不对，Mock 验证坏情况下不撒谎；两次都过才算过"<br>· PostgreSQL 用**本地已装实例**（MacPorts `/opt/local/bin/psql14`，v14，非容器）：`S0-3` compose 清单**删去 PG16**；版本基线钉为 **≥14**——全文档所用 PG 特性（JSONB/部分唯一索引/SKIP LOCKED/事务级 advisory lock/REVOKE UPDATE/`Now()`）均为 9.x 时代特性，已逐条核对，15+/16-only 语法引入前必须先上调基线（`design-notes.md` 新增 §0.6a）<br>· 新增 `S0-9`（L1/人工观察）本地临时联调栈（`docker-compose.integration.yml`，§0.6b）；`S0-8` 断言补 `server_version >= 14`；`local.py` 的 `INTEGRATION_MODE` 扩为三态 mock/integration，业务代码仍零分支<br>· 任务数 99→**100**；L1×51→**52**；人工观察 9→**10**；L3/L2/自动断言/故障注入不变；`design-notes.md` v0.3→**v0.4** |
 | v0.7 | **开工前缺口盘查落地**（`design-notes.md` v0.5 §7 第四轮 G-1~G-4）：<br>· **边 31 `TRIGGER_BUILD_LOST` 补录**进权威表（§3.6 早已引用而漏登）——`M2-06` 补主为触发者、`M1-09` 30→**31 条边**两处<br>· **边 25 补主**：新增 `M2-34` 终止端点（L2），同时闭环 `JenkinsProvider.abort` 遗留（§0.4 已补方法行；abort 失败不阻塞终止，落 warn 事件；终态单不得被迟到回调复活）<br>· **`S0-3` 补密钥交付物**：`.env.example`（全变量占位）+ `.gitignore`（`.env` 必入），DoD 补"`cp .env.example .env` 后 check 通过、`git status` 无 `.env`"——无出处则第一次提交就有真密钥进 git 历史的现实风险<br>· 边 10 陈旧引用"边 20"→"边 24"（design-notes 侧修复）<br>· **修 v0.6 漏账**：阶段总览 ASCII 块未随 `S0-9` 更新（11→12），本版一并改准；`合计 99` 为陈旧数字，现按实算重写<br>· 任务数 100→**101**；L2×23→**24**；自动断言×82→**83**；分布数字全部经脚本实算复核<br>· `PRD.md` §6 加一行数据模型权威指向（design-notes §1.2/§1.4/§1.7）<br>· 本表进入**开工基线**状态：开发期修订仅允许走 `/spec` Hard Stop 流程 |
+| v0.8 | **S0-1 spike 实据修订**（`design-notes.md` v0.6 §7 第五轮 F-1~F-5；开工基线冻结通道的第一次启用，经 Hard Stop 呈报 + 产品拍板）：<br>· `S0-1` 行加 ✅（报告 `docs/spikes/s0-1/report.md`）<br>· **F-3 拍板方案 ③′**：RESCUED 改"终态计数回填 + 对账"（`n == stats.rescued+failures` 才判，不等全判 FAILED + 告警）——`M1-15` DoD 增加对账断言<br>· `M1-15` 白名单增补 `runner_item_on_*` 族（loop 逐项结果的唯一载体）、`seq` 复用 payload.counter、线程措辞按实据改（生产定死 `run_async()`）<br>· `M1-17` 注记 item 行 `duration_ms=NULL`、stderr 列改为提取语义（事件无独立字段），比对基线指向 `docs/spikes/s0-1/samples/`<br>· `S0-2` 交接实据：`cancel_callback` 正常跑完亦被周期调用（取消判定必须显式置标志位）、unreachable 实测 ≈10s/黑洞主机（超时预算按 ≥10s 设）、`runner_item_on_failed/skipped/unreachable` 三成员故障注入补验<br>· 任务数 101、风险/验证分布**不变**（纯 DoD/措辞修订，无新增任务）；迁移表 31 边零触碰 |

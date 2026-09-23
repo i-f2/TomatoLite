@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 工程设计说明（Design Notes） |
-| 版本 | v0.5（设计评审稿） |
+| 版本 | v0.6（设计评审稿） |
 | 日期 | 2026-09-23 |
 | 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
 | 配套文档 | `docs/implementation-plan.md`（实施进度总表） |
-| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34` |
+| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`），迁移表 31 边不动 |
 
 ---
 
@@ -499,7 +499,9 @@ class AnsibleTaskResult(TimeStampedModel):    # tl_ansible_task
     run, host_ref = FK(cmdb_host, null=True), host_name, host_ip
     task_uuid, task_name, role, item_idx
     result_status   # OK|CHANGED|FAILED|UNREACHABLE|SKIPPED|RESCUED
+                    # RESCUED 无法从单条事件判出（S0-1 F-3），按 §2.3"终态计数回填"规则落值
     changed: bool; duration_ms; started_at, finished_at
+                    # duration_ms：item 行为 NULL（item 事件 payload 无 duration，S0-1 F-5）
     stdout_summary, stderr_summary, output_ref   # 全文落 artifact 文件
     class Meta:
         unique_together = [("run","host_name","task_uuid","item_idx")]
@@ -547,12 +549,18 @@ FOR UPDATE SKIP LOCKED LIMIT 1;
 
 ```
 ansible-runner (子进程, 输出 JSON event)
-   │  event_handler=cb  (ansible-runner 在独立线程回调)
+   │  event_handler=cb  (生产定死 run_async()：回调发生在 runner 的事件读取线程；
+   │                     S0-1 实据：同步 run() 下回调在调用线程本身——见 F-1)
    ▼
 EventPump._on_event(event)                      [apps/channels_b/runner/pump.py]
    │  归一化为 RunEvent(seq, kind, host, task, status, changed, duration_ms, stdout, stderr)
-   │  仅保留白名单 kind：playbook_on_task_start / runner_on_start / runner_on_ok /
-   │  runner_on_failed / runner_on_unreachable / runner_on_skipped / playbook_on_stats
+   │    seq←payload.counter(全局单调)  duration_ms←event_data.duration×1000(item 行 NULL, F-5)
+   │    stderr 列：事件 payload 无独立字段，从 res.msg/exception + stdout(剥 ANSI) 提取 (F-4)
+   │  白名单 kind（v0.6 按 S0-1 实据增补末族）：playbook_on_task_start / runner_on_start /
+   │  runner_on_ok / runner_on_failed / runner_on_unreachable / runner_on_skipped /
+   │  playbook_on_stats / runner_item_on_ok / runner_item_on_failed|skipped|unreachable
+   │  （item 族承载全部 loop 逐项结果，漏掉则 AnsibleTaskResult 的 item_idx 行永远写不出，
+   │    item_on_failed/skipped/unreachable 三成员 S0-1 未触发，S0-2 故障注入补验）
    ├─▶ Redis LPUSH tl:run:{run_id}:events  (+ LTRIM 0 5000)   ← 重连补发用
    └─▶ Redis PUBLISH tl:run:{run_id}:bus                      ← 实时扇出
                     │
@@ -574,6 +582,32 @@ EventPump._on_event(event)                      [apps/channels_b/runner/pump.py]
 - Django 连接是线程局部的：Persister 线程必须自己 `close_old_connections()`，且**不能是 daemon 线程**（否则主任务结束时正在 flush 的批次被丢）。终态事件必须同步 flush 并 `join(timeout=5)`。
 - group 名 `tl.run.{uuid}`：Channels 组名限 ASCII 字母数字与 `-_.`、长度 ≤100。用 int id 拼容易踩长度/字符问题。
 - **权限门禁在 `connect()`。** Channels group 无访问控制，任何人猜到组名即可订阅。`connect` 内必须校验用户对 ticket 的可见性——否则任何人都能看生产发布日志。
+
+**RESCUED 的终态计数回填（2026-09-23 拍板，方案 ③′；S0-1 实据 F-3）**
+
+S0-1 spike 证明：被 `rescue` 挽回的 `runner_on_failed` 事件**不带任何事件级标志**（`ignore_errors=False`、无 `rescued` 字段，`samples/main_runner_on_failed.json`），单条事件无法与致命失败区分。但实据同时给出两个可靠锚点：① ansible 语义下**致命失败会立即把该主机踢出当 play**，即某主机的致命失败必然是它在该 play 的最后一条 failed；② `playbook_on_stats` 的 `failures` 计数**不包含**被 rescue 的失败尝试（`run_meta.json.main` + `events_stream.jsonl:L41`：`failures={}, rescued={"localhost":1}`）。落库规则：
+
+```
+终态（playbook_on_stats）时，对每台 host：
+  n = 该 host 无 ignore_errors 标志的 runner_on_failed 条数
+  r = stats.rescued[host]；f = stats.failures[host]
+  n == r + f  →  按任务顺序，最后 f 条判 FAILED，先前 r 条判 RESCUED
+  n != r + f  →  不做任何推断：全部判 FAILED，并写 rescued 对账告警事件
+```
+
+对账不等即"结果未知"，**必须显式表达**（同本节失败策略表末列的立场），禁止靠启发式硬猜成功。
+
+**S0-1 spike 实测修订（v0.6，F-1 ~ F-5，全文见 `docs/spikes/s0-1/report.md` 附D）**
+
+| # | 原假设 | 实据结论 | 已落入 |
+|---|---|---|---|
+| F-1 | "event_handler 在独立线程回调" | 同步 `run()` 在调用线程回调（41/41、5006/5006 全 `MainThread`）；架构结论不变，生产定死 `run_async()` | 上图回调行 |
+| F-2 | 白名单 7 kind 够用 | loop 逐项结果**全部**走白名单外的 `runner_item_on_ok`（压测 5000/5000） | 上图白名单行 |
+| F-3 | RESCUED 可由事件流判出 | 事件级无标志，**证伪** → 终态计数回填方案 ③′ | 上两块 |
+| F-4 | RunEvent 有 stderr | payload 无独立字段，错误文本混在 stdout(ANSI) 与 `res.msg/exception` | 上图归一化行 |
+| F-5 | item 行有 duration | item 事件 `event_data.duration=None` | §2.1 模型注 + 上图 |
+
+补充实据（非假设修订）：事件↔`job_events/<counter>-<uuid>.json` 严格 1:1、counter 可作 `seq`；事件级自带 `stdout` 全文（§2.4① 懒加载成立且强于假设）；速率实测 ≈550 ev/s 无反压（Q7）；`cancel_callback` 正常跑完亦被调用 2~3 次（周期轮询，**不能以被调用当取消**，S0-2 起取消标志必须显式置位）。
 
 **泵与落库的失败策略（此前未定义，是"日志缺一段但单据显示成功"的来源）**：
 
@@ -1359,3 +1393,17 @@ def evaluate(run: VerificationRun) -> Conclusion:
 **盘查中确认不需要处理的**：① 剩余 5 项 OQ 均有"抽象先行"临时打法，不在关键路径；② Mock/真实双层环境口径 v0.4/v0.6 已闭环；③ **本仓 CI 暂不加任务**——托管平台未定（现为本地 git），`S0-7` 的 pre-commit + pytest 本地门即当前权威验证门；将来落到 GitLab/GitHub 托管时再在变更记录里补一条任务，避免为一个还不存在的平台写流水线定义；④ `docs/spikes/` 目录随 `S0-1` 交付自然创建，无需预留。
 
 本轮后设计文档进入**冻结观察**状态：开发期只允许"发现文档与实现冲突时按 `/spec` 的 Hard Stop 流程修订"，不允许顺手改设计。
+
+### 第五轮（2026-09-23）：S0-1 spike 实据修订
+
+本轮即第四轮所述冻结通道的**第一次启用**：S0-1 spike（`docs/spikes/s0-1/report.md`）对 §2.3 假设逐条取证，5 项不符按 Hard Stop 呈报、产品拍板后修订。迁移表 31 边零触碰。
+
+| # | 原假设 | 实据（证据路径见 report 附D） | 处理 |
+|---|---|---|---|
+| F-1 | "event_handler 在独立线程回调" | 同步 `run()` 回调在调用线程（全量 MainThread） | §2.3 图改注：**生产定死 `run_async()`**；"不许在 handler 里同步 INSERT"的理由链在 async 下不变 |
+| F-2 | 白名单 7 kind 覆盖所需事件 | loop 逐项结果全部走白名单外的 `runner_item_on_ok`（压测 5000/5000 实证） | 白名单增补 `runner_item_on_*` 族；三成员未触发，**S0-2 故障注入补验** |
+| F-3 | `result_status` 的 RESCUED 可由事件流判出 | 被 rescue 的 failed 事件无任何事件级标志；仅 `stats.failures 不含 rescued 尝试` + `致命失败踢出 host` 两个聚合锚点 | **证伪**。产品拍板方案 **③′：终态计数回填 + 对账**，对账不等全部判 FAILED 并告警（规则全文见 §2.3） |
+| F-4 | `RunEvent` 有 stderr 列 | payload 无独立 stderr，错误文本混在 stdout(ANSI)/`res.msg/exception` | §2.3 归一化行改注"提取"语义 |
+| F-5 | item 行有 duration | item 事件 `duration=None` | §2.1 `duration_ms` item 行允许 NULL |
+
+**顺带产出（无需设计变更，但改变了 S0-2/M1 的已知边界）**：`seq` 可直接复用 `counter`（严格单调 1:1）；事件级自带 stdout 全文，§2.4① 懒加载成立且强于假设；速率 ≈550 ev/s 无反压；`cancel_callback` 在正常跑完时也被周期调用（**取消判定必须显式置标志位**，已列 S0-2 交接清单）；黑洞主机 unreachable 实测 10.03s（`ConnectTimeout=3` 被 ssh 重试放大到 ~10s）——超时预算按 ≥10s/主机 设。
