@@ -4,6 +4,7 @@
 数据库求值，规避 app/worker 机器与 DB 的时钟漂移（sweeper/超时判定属此类）。
 **不要**对返回值调 `.now()` 取 Python 时间——它的意义恰恰是被渲染进 SQL。
 """
+
 from django.db.models.functions import Now
 
 

@@ -4,6 +4,7 @@
 里一个布尔位。`version` 同样落成真文件（`VERSION`），HTTP `/version`、SSH
 `cat`、控制面写三者同源（口径=§6 第 3 条"单一实现"的文件版：单一出处）。
 """
+
 from __future__ import annotations
 
 import os
@@ -17,12 +18,12 @@ SEED_LOG_LINES = [
 ]
 
 DEFAULT_CONFIG = {
-    "http_status": 200,        # M2-11 期望码素材
-    "http_body": '{"status":"ok"}',   # M2-11 响应关键字素材
-    "http_mode": "normal",     # normal | refuse(真关听=RST) | blackhole(收了不回)
-    "tcp_listen": True,        # M2-12 裸 TCP 端口开/关
-    "version": "1.2.3",        # 版本注入（写入 VERSION 文件，多面同源）
-    "process_alive": True,     # 进程状态注入；False ⇒ 联动 app 端口拒连
+    "http_status": 200,  # M2-11 期望码素材
+    "http_body": '{"status":"ok"}',  # M2-11 响应关键字素材
+    "http_mode": "normal",  # normal | refuse(真关听=RST) | blackhole(收了不回)
+    "tcp_listen": True,  # M2-12 裸 TCP 端口开/关
+    "version": "1.2.3",  # 版本注入（写入 VERSION 文件，多面同源）
+    "process_alive": True,  # 进程状态注入；False ⇒ 联动 app 端口拒连
 }
 
 

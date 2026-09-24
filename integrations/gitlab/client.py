@@ -2,6 +2,7 @@
 
 三态（mock/integration/prod，§0.6）差异只在 base_url——构造参数进、分支不出（§0.2 规则 2）。
 """
+
 from __future__ import annotations
 
 import httpx

@@ -3,6 +3,7 @@
 工厂只收**字符串参数**（apps 侧读 settings.K8S_READER 传入）——本包不知道 settings 存在
 （§0.2 规则 1）。app/env 语义键到集群坐标的解析在 apps/cmdb（与 resolve_hosts 同层）。
 """
+
 from __future__ import annotations
 
 import abc

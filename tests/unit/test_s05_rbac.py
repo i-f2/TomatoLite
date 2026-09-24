@@ -4,6 +4,7 @@ envelope 有效性、role_at_least 序与 system 无秩、SoD 同人拒/异人�
 调用方式 = APIRequestFactory + view(request) 直调（受控视图不落 urls——S0-5
 Non-Goal；异常面走 dispatch→handle_exception→全局 handler，与真实请求同链）。
 """
+
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
@@ -57,7 +58,8 @@ def users():
     made = {}
     for value in ("business", "dev", "ops", "admin"):
         made[value] = User.objects.create_user(
-            username=f"u-{value}", password=f"pw-{value}-9", role=value)
+            username=f"u-{value}", password=f"pw-{value}-9", role=value
+        )
     sysu = User(username="u-system", role=Role.SYSTEM)
     sysu.set_password("pw-system-9")
     sysu.save()
@@ -71,7 +73,7 @@ SITES = {
     "dev_site": (Role.DEV, Role.OPS, Role.ADMIN),
     "ops_site": (Role.OPS, Role.ADMIN),
     "admin_site": (Role.ADMIN,),
-    "system_site": (Role.SYSTEM,),          # 显式列出才放——system 不随任何门槛
+    "system_site": (Role.SYSTEM,),  # 显式列出才放——system 不随任何门槛
 }
 
 MATRIX = [  # (site, role, expected_status, expected_code)
@@ -103,7 +105,7 @@ def test_role_site_matrix(users, site, role, status, code):
     r = _call(_site(f"{site}_{role}", SITES[site]), user=users[role])
     assert r.status_code == status
     if status == 200:
-        assert r.data == {"ok": True}       # 成功体不归 handler 管（envelope 是错误面契约）
+        assert r.data == {"ok": True}  # 成功体不归 handler 管（envelope 是错误面契约）
     else:
         assert r.data["code"] == code
 
@@ -140,21 +142,23 @@ def test_missing_required_roles_is_config_error(users):
 
 # ---- 2) role_at_least ----
 
+
 def test_role_at_least_ordering(users):
     assert role_at_least(users[Role.ADMIN], Role.BUSINESS)
     assert not role_at_least(users[Role.BUSINESS], Role.DEV)
     assert not role_at_least(users[Role.OPS], Role.ADMIN)
-    assert role_at_least(users[Role.OPS], Role.OPS)              # 同秩放
+    assert role_at_least(users[Role.OPS], Role.OPS)  # 同秩放
     assert not role_at_least(users[Role.SYSTEM], Role.BUSINESS)  # 无秩恒 False
     assert not role_at_least(AnonymousUser(), Role.BUSINESS)
 
 
 # ---- 3) SoD：发起人≠审批人（PRD §3 硬约束）----
 
+
 def test_sod_rejects_same_person(users):
     ops = users[Role.OPS]
     with pytest.raises(AppError) as e:
-        enforce_separation_of_duties(actor=ops, owner=ops)   # 同人（换会话仍同 pk）拒
+        enforce_separation_of_duties(actor=ops, owner=ops)  # 同人（换会话仍同 pk）拒
     assert e.value.status_code == 403
     assert e.value.code_slug == "SEPARATION_OF_DUTIES"
 

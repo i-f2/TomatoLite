@@ -2,6 +2,7 @@
 受控端点在**视图层显式声明** `required_roles`——缺声明按配置错误炸，
 不许静默放行也不许静默 403（两种静默都会把越权/误锁写进"全绿"里）。
 """
+
 from django.core.exceptions import ImproperlyConfigured
 from rest_framework.permissions import BasePermission
 
@@ -20,7 +21,8 @@ class HasRole(BasePermission):
         required = getattr(view, "required_roles", None)
         if required is None:
             raise ImproperlyConfigured(
-                f"{type(view).__name__} 使用 HasRole 但未声明 required_roles")
+                f"{type(view).__name__} 使用 HasRole 但未声明 required_roles"
+            )
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
             raise AppError("未认证", code="NOT_AUTHENTICATED", status_code=401)

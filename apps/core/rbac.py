@@ -7,6 +7,7 @@
   actor 秩 ≥ ops **且** actor ≠ owner。守卫在状态机层（M1-09/M2-25 消费），
   本模块只提供函数本体，不落任何视图（S0-5 Non-Goal）。
 """
+
 from .exceptions import AppError
 from .models import ROLE_RANK, Role
 

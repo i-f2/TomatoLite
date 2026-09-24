@@ -12,12 +12,12 @@ publickey-only 的实现真相：asyncssh 服务端对 password 请求只会**�
 绝不交互式发问——BatchMode 客户端（§1132 首坑：密码提示挂到超时）在本 mock
 上不可能挂住；错钥被拒由测试断"快"而不只是"拒"。
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 import shlex
-import stat as statmod
 import threading
 
 import asyncssh
@@ -55,12 +55,12 @@ def run_command(state: State, argv: list[str]) -> tuple[int, str, str]:
                 return 2, "", "usage: pgrep [-f] pattern\n"
             if alive and pat and pat in APP_CMDLINE:
                 return 0, f"{APP_PID}\n", ""
-            return 1, "", ""              # 真 pgrep：查无此进程=退出码 1，无 stderr
+            return 1, "", ""  # 真 pgrep：查无此进程=退出码 1，无 stderr
 
         if cmd == "systemctl" and args[:1] == ["is-active"]:
             if alive and len(args) > 1 and args[1] == APP_UNIT:
                 return 0, "active\n", ""
-            return 3, "inactive\n", ""     # systemd 惯例：非 active 一律 exit 3
+            return 3, "inactive\n", ""  # systemd 惯例：非 active 一律 exit 3
 
         if cmd == "kill":
             if args[:1] != ["-0"] or len(args) != 2:
@@ -97,9 +97,12 @@ def run_command(state: State, argv: list[str]) -> tuple[int, str, str]:
             if real is None or not os.path.exists(real):
                 return 1, "", f"stat: cannot statx '{args[2]}': {_NO_FILE}\n"
             st = os.stat(real)
-            out = (args[1].replace("%i", str(st.st_ino))
-                   .replace("%s", str(st.st_size))
-                   .replace("%n", real))
+            out = (
+                args[1]
+                .replace("%i", str(st.st_ino))
+                .replace("%s", str(st.st_size))
+                .replace("%n", real)
+            )
             return 0, out + "\n", ""
 
         return 127, "", f"bash: line 1: {cmd}: command not found\n"
@@ -114,12 +117,12 @@ class _ExecSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         self.chan = chan
 
-    def exec_requested(self, command: str) -> bool:      # asyncssh classic 会话钩子
+    def exec_requested(self, command: str) -> bool:  # asyncssh classic 会话钩子
         try:
             self._argv = shlex.split(command or "")
         except ValueError:
             self._argv = []
-        return True          # 只放行；契约明写 session_started 前不得发输出
+        return True  # 只放行；契约明写 session_started 前不得发输出
 
     def session_started(self) -> None:
         # 通道完全打开后才执行并回写；exit() 自带"发 exit-status + 关通道"（2.24 文档）
@@ -136,7 +139,7 @@ class _Server(asyncssh.SSHServer):
         self._state = state
 
     def begin_auth(self, username: str) -> bool:
-        return True                        # 永远要求认证，无匿名通道
+        return True  # 永远要求认证，无匿名通道
 
     def session_requested(self):
         return _ExecSession(self._state)
@@ -145,8 +148,14 @@ class _Server(asyncssh.SSHServer):
 class SshEndpoint:
     """独立事件循环线程上跑 asyncssh listen（与 http.server 线程群并存于一个进程）。"""
 
-    def __init__(self, state: State, addr: str = "127.0.0.1", port: int = 0,
-                 authorized_keys_path: str = "", host_key_path: str = ""):
+    def __init__(
+        self,
+        state: State,
+        addr: str = "127.0.0.1",
+        port: int = 0,
+        authorized_keys_path: str = "",
+        host_key_path: str = "",
+    ):
         self._state = state
         self._addr = addr
         self._bind_port = port
@@ -165,7 +174,9 @@ class SshEndpoint:
     async def _serve(self):
         state = self._state
         return await asyncssh.create_server(
-            lambda: _Server(state), self._addr, self._bind_port,
+            lambda: _Server(state),
+            self._addr,
+            self._bind_port,
             server_host_keys=[self._host_key_path],
             authorized_client_keys=self._authorized_keys_path,
         )

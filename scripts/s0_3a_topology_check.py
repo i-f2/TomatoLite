@@ -9,6 +9,7 @@
   .venv/bin/python scripts/s0_3a_topology_check.py            # 全部阶段
   .venv/bin/python scripts/s0_3a_topology_check.py --only positive
 """
+
 import argparse
 import json
 import os
@@ -76,8 +77,13 @@ def positive(r, n_tasks=12, seconds=3.0):
     sample = _sample(app, "runner@tl")
     ok_drain = drain(r, n_tasks)
     mx = int(r.get(f"{KEY}:max") or 0)
-    return {"ok": ok_drain and mx == 3 and sample["llen"] > 0 and sample["reserved"] <= 3,
-            "tasks": n_tasks, "max_active": mx, "expected_max": 3, "sample": sample}
+    return {
+        "ok": ok_drain and mx == 3 and sample["llen"] > 0 and sample["reserved"] <= 3,
+        "tasks": n_tasks,
+        "max_active": mx,
+        "expected_max": 3,
+        "sample": sample,
+    }
 
 
 DC = ["docker", "compose", "--project-directory", str(ROOT)]
@@ -110,10 +116,28 @@ def inject(r, n_tasks=12, seconds=3.0):
     cid = ""
     try:
         reset()
-        cid = _dc("run", "-d", "--no-deps", "--rm", "worker_runner",
-                  "celery", "-A", "config", "worker", "-Q", "exec.runner",
-                  "-n", "inj@tl", "--concurrency=3", "--prefetch-multiplier=4",
-                  "--loglevel=INFO").strip().splitlines()[-1]
+        cid = (
+            _dc(
+                "run",
+                "-d",
+                "--no-deps",
+                "--rm",
+                "worker_runner",
+                "celery",
+                "-A",
+                "config",
+                "worker",
+                "-Q",
+                "exec.runner",
+                "-n",
+                "inj@tl",
+                "--concurrency=3",
+                "--prefetch-multiplier=4",
+                "--loglevel=INFO",
+            )
+            .strip()
+            .splitlines()[-1]
+        )
         if not _wait_ping(app, "inj@tl"):
             raise RuntimeError("inj@tl 启动超时")
         for _ in range(n_tasks):
@@ -122,11 +146,17 @@ def inject(r, n_tasks=12, seconds=3.0):
         sample = _sample(app, "inj@tl")
         ok_drain = drain(r, n_tasks)
         mx = int(r.get(f"{KEY}:max") or 0)
-        result = {"ok": (ok_drain and sample["llen"] == 0
-                         and sample["reserved"] == n_tasks - 3 and mx == 3),
-                  "tasks": n_tasks, "max_active": mx,
-                  "assertion": "LLEN==0 ∧ reserved==9 ∧ max_active==3",
-                  "sample": sample, "concurrency": 3, "prefetch_multiplier": 4}
+        result = {
+            "ok": (
+                ok_drain and sample["llen"] == 0 and sample["reserved"] == n_tasks - 3 and mx == 3
+            ),
+            "tasks": n_tasks,
+            "max_active": mx,
+            "assertion": "LLEN==0 ∧ reserved==9 ∧ max_active==3",
+            "sample": sample,
+            "concurrency": 3,
+            "prefetch_multiplier": 4,
+        }
     finally:
         if cid:
             subprocess.run(["docker", "rm", "-f", cid], capture_output=True, timeout=60)
@@ -150,14 +180,29 @@ def active_queues():
         "default@tl": {"sweeper", "notify", "default"},
     }
     out = subprocess.run(
-        [*DC, "exec", "-T", "worker_callback",
-         "celery", "-A", "config", "inspect", "active_queues", "-j"],
-        capture_output=True, text=True, timeout=60)
+        [
+            *DC,
+            "exec",
+            "-T",
+            "worker_callback",
+            "celery",
+            "-A",
+            "config",
+            "inspect",
+            "active_queues",
+            "-j",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     try:
-        payload = json.loads(out.stdout[out.stdout.find("{"):])
+        payload = json.loads(out.stdout[out.stdout.find("{") :])
     except ValueError:
-        return {"ok": False,
-                "error": f"rc={out.returncode} stdout={out.stdout[:200]!r} stderr={out.stderr[:200]!r}"}
+        return {
+            "ok": False,
+            "error": f"rc={out.returncode} stdout={out.stdout[:200]!r} stderr={out.stderr[:200]!r}",
+        }
     detail = {}
     for node, want in expect.items():
         got = {q["name"] for q in payload.get(node, [])}
@@ -165,15 +210,21 @@ def active_queues():
     extra = sorted(set(payload) - set(expect))
     if extra:
         detail["_unexpected_nodes"] = {"ok": False, "got": extra}
-    return {"ok": all(v["ok"] for v in detail.values()),
-            "nodes_online": len(payload), "pools": detail}
+    return {
+        "ok": all(v["ok"] for v in detail.values()),
+        "nodes_online": len(payload),
+        "pools": detail,
+    }
 
 
 def beat_singleton():
     out = subprocess.run(
         ["docker", "ps", "--format", "{{.Names}}|{{.Command}}"],
-        capture_output=True, text=True, timeout=15)
-    n = sum(1 for l in out.stdout.splitlines() if "beat" in l and l.startswith("tl-"))
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    n = sum(1 for ln in out.stdout.splitlines() if "beat" in ln and ln.startswith("tl-"))
     return {"ok": n == 1, "beat_containers": n}
 
 

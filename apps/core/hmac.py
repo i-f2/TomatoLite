@@ -7,6 +7,7 @@ string-to-sign = `f"{ts}.{raw}"`（`raw` 为**原始字节**，禁止 json 重�
 per-job secret 由调用方传入（配置解析归 M2-05），本模块零 Django、零 settings——
 mock 进程无 Django 环境直接 import（有双重断言锁死）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,8 +29,15 @@ def sign(secret: str, ts: int, raw: bytes) -> str:
     return PREFIX + hmac.new(secret.encode(), sts, hashlib.sha256).hexdigest()
 
 
-def verify(secret: str, raw: bytes, header: str | None, ts,
-           *, window_s: int = DEFAULT_WINDOW_S, now: int | None = None) -> bool:
+def verify(
+    secret: str,
+    raw: bytes,
+    header: str | None,
+    ts,
+    *,
+    window_s: int = DEFAULT_WINDOW_S,
+    now: int | None = None,
+) -> bool:
     """常量时间比对 + 时间窗。任何缺项/越窗/格式错都拒（返回 False，不抛）。"""
     if header is None or not isinstance(raw, bytes):
         return False
@@ -40,6 +48,6 @@ def verify(secret: str, raw: bytes, header: str | None, ts,
     except (TypeError, ValueError):
         return False
     now_int = int(now if now is not None else time.time())
-    if abs(now_int - ts_int) > window_s:          # 防重放时间窗（§3.3）
+    if abs(now_int - ts_int) > window_s:  # 防重放时间窗（§3.3）
         return False
     return hmac.compare_digest(sign(secret, ts_int, raw), header)  # 常量时间（§1.6 规则 2）

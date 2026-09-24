@@ -1,0 +1,22 @@
+# S0-7 质量门钩子（拍板④：repo:local——直接调 .venv 中钉版工具，版本单源
+# requirements-dev.txt，不在 pre-commit 自管的缓存里再下一套 wheel）。
+# 前提：命令一律从仓库根目录运行（pre-commit 的 hook cwd 即 git 顶层）。
+# 顺序有讲究：先 ruff --fix（会删/改 import），后 black（排版定型）——反序则
+# ruff 的 autofix 可能重新撑破 black 的版式。
+# docs/ 排除钉在钩子层而非只靠工具 exclude：**black 26.5 实据**——force-exclude
+# 配置被读到、正则匹配得中，但显式传路径时仍照常格式化（`black docs/x.py` 真改文件）；
+# docs/spikes/ 是归档实据（毁证禁区），必须在入参层就拦下。
+exclude: '^docs/'
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check --fix（lint：E4/E7/E9/F，规则集钉在 pyproject.toml）
+        entry: .venv/bin/ruff check --fix
+        language: system
+        types: [python]
+      - id: black
+        name: black（format：line-length=100，钉在 pyproject.toml）
+        entry: .venv/bin/black
+        language: system
+        types: [python]

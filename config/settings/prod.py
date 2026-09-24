@@ -3,6 +3,7 @@
 骨架期只落"结构"，运维参数按部署环境再调；task_routes 的键为最终 task 全名，
 S0-4/S0-5 落 app 时逐条替换占位注释。
 """
+
 from .base import *  # noqa: F401,F403
 from .base import env, CHANNEL_LAYERS  # noqa: F401
 

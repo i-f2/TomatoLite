@@ -4,6 +4,7 @@
   HTTP 层走真状态码给网关/监控看，契约层 code 给前端分支看（§0.4 口径）。
 - `request_id`：uuid4 hex，全链路追踪锚点（X-04 日志关联）。
 """
+
 import uuid
 
 from rest_framework.response import Response
@@ -23,5 +24,6 @@ def ok(data=None, message="success", status=200):
 
 
 def fail(code, message, status=400, data=None, request_id=None):
-    return Response(envelope(data=data, code=code, message=message, request_id=request_id),
-                    status=status)
+    return Response(
+        envelope(data=data, code=code, message=message, request_id=request_id), status=status
+    )

@@ -3,6 +3,7 @@
 所有密钥/端点一律 `env("X")`——缺 .env 即 ImproperlyConfigured，
 这是对"第一次提交就有真密钥进 git 历史"那道防线（S0-3 DoD 的负断言）的正断言。
 """
+
 from pathlib import Path
 
 import environ
@@ -58,11 +59,13 @@ TEMPLATES = [
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [],
         "APP_DIRS": True,
-        "OPTIONS": {"context_processors": [
-            "django.template.context_processors.request",
-            "django.contrib.auth.context_processors.auth",
-            "django.contrib.messages.context_processors.messages",
-        ]},
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ]
+        },
     },
 ]
 WSGI_APPLICATION = "config.wsgi.application"

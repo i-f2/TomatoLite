@@ -3,6 +3,7 @@
 `ticket`/`view` 是 apps 侧对象——本包零 Django（§0.2 规则 1），故签名以结构化
 窄类型收：调用方（apps/feedback）负责把卡片字段抽成 ConfirmCard 传入。
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -12,7 +13,7 @@ import enum
 class FeedbackActionType(str, enum.Enum):
     APPROVE = "approve"
     REJECT = "reject"
-    CONFIRM_DEPLOY = "confirm_deploy"   # 通道 A 两类回执（§4）
+    CONFIRM_DEPLOY = "confirm_deploy"  # 通道 A 两类回执（§4）
     UNKNOWN = "unknown"
 
 

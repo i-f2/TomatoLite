@@ -1,4 +1,5 @@
 """S0-3 骨架端点。业务 API 一律从 S0-4 起（§0.1 app 划分之后）。"""
+
 from django.http import JsonResponse
 
 

@@ -1,0 +1,40 @@
+# S0-7 质量门配置（dev 工具钉版在 requirements-dev.txt，生产清单与 Dockerfile 不动）。
+
+[tool.black]
+# 线宽 100 而非默认 88：现存 >88 列 462 行、>100 列仅 167 行——100 把扫荡面压小，
+# 且不逼长中文注释拆行（拍板②：禁为凑列宽伤可读性）。E501 不设硬规则，线宽=对
+# "可被格式化的代码"的软约束。
+line-length = 100
+target-version = ["py312"]
+# pre-commit 传显式文件路径时 exclude 不生效，force-exclude 才压得住（docs 同下）。
+# 注意 black 的 extend-exclude 是**单个字符串正则**（ruff 才是列表）——26.5 实钉。
+force-exclude = true
+extend-exclude = '(^|/)docs($|/)'
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+force-exclude = true
+# docs/spikes/ 是已归档的 spike **实据**（当时真跑过什么就冻存什么），重排=毁证
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+# 显式钉死 ruff 默认规则集——不写 select 则规则集随 ruff 版本升级漂移，门禁变数不可控
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# 零触碰区内的定点豁免（S0-7 拍板边界）：宁在门禁配置层留**可见、可审、带失效条件**
+# 的例外，也不进 Non-Goal 文件里改一行——
+# · prod.py 的 CHANNEL_LAYERS 是"base 显式再导出 + prod 覆盖"的 Django settings 惯用
+#   型样（行 7 本就自注 noqa: F401），非缺陷。
+# · interface.py 的 collections.abc 是 §0.4 签名骨架期搭手，M1-13 消费/清理该文件时
+#   **必须一并撤掉此豁免**。
+"config/settings/prod.py" = ["F811"]
+"integrations/jenkins/interface.py" = ["F401"]
+
+[tool.coverage.run]
+# 口径=被测生产代码（拍板③）：mocks/tests 的自证方式是它们自己全绿，不计量
+source = ["apps", "integrations", "config"]
+
+[tool.coverage.report]
+# 地板经 pytest.ini `--cov-fail-under=N` 挂闸（Step 2 实测定底，向下取整 5=棘轮起点）

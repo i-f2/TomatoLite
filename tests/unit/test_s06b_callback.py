@@ -5,6 +5,7 @@
 "验签会挂且挂在密钥上、不挂在格式上"。config 先经 fixture 进程内设置
 （`_control/config` HTTP 口在 Step 3）。
 """
+
 import json
 import threading
 import time
@@ -25,11 +26,13 @@ class _Capturer(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n)
-        self.server.received.append({
-            "raw": raw,
-            "sig": self.headers.get(tl_hmac.SIG_HEADER),
-            "ts": self.headers.get(tl_hmac.TS_HEADER),
-        })
+        self.server.received.append(
+            {
+                "raw": raw,
+                "sig": self.headers.get(tl_hmac.SIG_HEADER),
+                "ts": self.headers.get(tl_hmac.TS_HEADER),
+            }
+        )
         self.send_response(200)
         self.send_header("Content-Length", "2")
         self.end_headers()
@@ -44,10 +47,16 @@ def jk():
     cap.received = []
     cap.daemon_threads = True
     threading.Thread(target=cap.serve_forever, daemon=True).start()
-    yield {"url": f"http://127.0.0.1:{httpd.server_address[1]}", "state": state,
-           "recv": f"http://127.0.0.1:{cap.server_address[1]}", "cap": cap}
-    httpd.shutdown(); httpd.server_close()
-    cap.shutdown(); cap.server_close()
+    yield {
+        "url": f"http://127.0.0.1:{httpd.server_address[1]}",
+        "state": state,
+        "recv": f"http://127.0.0.1:{cap.server_address[1]}",
+        "cap": cap,
+    }
+    httpd.shutdown()
+    httpd.server_close()
+    cap.shutdown()
+    cap.server_close()
 
 
 def _trigger(url, **params):
@@ -79,16 +88,16 @@ def test_terminal_build_sends_verifiable_signed_callback(jk):
     _trigger(jk["url"])
     _wait_got(lambda: len(jk["cap"].received) == 1)
     got = jk["cap"].received[0]
-    assert _verify_with(jk["state"], got)                    # 原始字节上真验得过
+    assert _verify_with(jk["state"], got)  # 原始字节上真验得过
     p = json.loads(got["raw"])
     assert p["event"] == "build_finished"
     assert p["job_full_name"] == "tl-release" and p["build_number"] == 3
     assert p["result"] == "SUCCESS" and p["building"] is False
-    assert p["displayName"] == "#3 TL-20260924-100"          # §3.4 归属路径①素材
+    assert p["displayName"] == "#3 TL-20260924-100"  # §3.4 归属路径①素材
     assert p["actions"][0]["parameters"][0]["name"] == "TICKET_CODE"
     assert p["changeSet"]["items"] == [{"commitId": "a" * 40}]  # 路径③素材
-    assert p["timestamp"] > 1_700_000_000_000                # epoch ms（§3.6）
-    assert abs(int(time.time()) - int(got["ts"])) <= 30      # ts 在窗内
+    assert p["timestamp"] > 1_700_000_000_000  # epoch ms（§3.6）
+    assert abs(int(time.time()) - int(got["ts"])) <= 30  # ts 在窗内
     log = _callbacks(jk["url"])
     assert len(log) == 1 and log[0]["status"] == 200
 
@@ -126,29 +135,46 @@ def test_bad_signature_two_phase(jk):
 
 def test_emit_callback_manual_replay_and_shapes(jk):
     _trigger(jk["url"])
-    _wait_got(lambda: httpx.get(f"{jk['url']}/job/tl-release/3/api/json"
-                                ).json()["building"] is False)
-    assert _callbacks(jk["url"]) == []                        # 未配 notify_url=静默
-    r = httpx.post(f"{jk['url']}/_control/emit_callback",
-                   json={"job": "tl-release", "number": 3, "url": jk["recv"]})
+    _wait_got(
+        lambda: httpx.get(f"{jk['url']}/job/tl-release/3/api/json").json()["building"] is False
+    )
+    assert _callbacks(jk["url"]) == []  # 未配 notify_url=静默
+    r = httpx.post(
+        f"{jk['url']}/_control/emit_callback",
+        json={"job": "tl-release", "number": 3, "url": jk["recv"]},
+    )
     assert r.status_code == 200 and r.json()["emitted"] is True
     got = jk["cap"].received[0]
     assert _verify_with(jk["state"], got)
     p = json.loads(got["raw"])
     assert p["build_number"] == 3 and p["result"] == "SUCCESS"
-    httpx.post(f"{jk['url']}/_control/emit_callback",
-               json={"job": "tl-release", "number": 3, "url": jk["recv"]})
-    assert jk["cap"].received[1]["raw"] == got["raw"]          # 重放逐字节一致
-    r3 = httpx.post(f"{jk['url']}/_control/emit_callback",
-                    json={"job": "tl-release", "number": 3, "url": jk["recv"],
-                          "event": "stage_finished", "stage_name": "Build"})
+    httpx.post(
+        f"{jk['url']}/_control/emit_callback",
+        json={"job": "tl-release", "number": 3, "url": jk["recv"]},
+    )
+    assert jk["cap"].received[1]["raw"] == got["raw"]  # 重放逐字节一致
+    r3 = httpx.post(
+        f"{jk['url']}/_control/emit_callback",
+        json={
+            "job": "tl-release",
+            "number": 3,
+            "url": jk["recv"],
+            "event": "stage_finished",
+            "stage_name": "Build",
+        },
+    )
     p3 = json.loads(jk["cap"].received[2]["raw"])
     assert p3["event"] == "stage_finished" and p3["stage_name"] == "Build"
     assert r3.json()["delivery"]["status"] == 200
-    assert httpx.post(f"{jk['url']}/_control/emit_callback",
-                      json={"job": "tl-release", "number": 99}).status_code == 400
-    assert httpx.post(f"{jk['url']}/_control/emit_callback",
-                      json={"number": 3}).status_code == 400   # 无处可发也 400
+    assert (
+        httpx.post(
+            f"{jk['url']}/_control/emit_callback", json={"job": "tl-release", "number": 99}
+        ).status_code
+        == 400
+    )
+    assert (
+        httpx.post(f"{jk['url']}/_control/emit_callback", json={"number": 3}).status_code == 400
+    )  # 无处可发也 400
 
 
 def test_receiver_failure_recorded_not_swallowed(jk):
@@ -158,7 +184,7 @@ def test_receiver_failure_recorded_not_swallowed(jk):
     rec = _callbacks(jk["url"])[0]
     assert rec["status"] == 0 and rec["error"]
     d = httpx.get(f"{jk['url']}/job/tl-release/3/api/json").json()
-    assert d["result"] == "SUCCESS"                            # 回调失败不弄坏构建
+    assert d["result"] == "SUCCESS"  # 回调失败不弄坏构建
 
 
 def test_stop_abort_notifies(jk):
@@ -175,6 +201,6 @@ def test_notify_delay_ms_defers_delivery(jk):
     jk["state"].config.update(notify_url=jk["recv"], notify_delay_ms=400)
     _trigger(jk["url"])
     time.sleep(0.15)
-    assert _callbacks(jk["url"]) == []                         # 相①：未到
-    _wait_got(lambda: len(_callbacks(jk["url"])) == 1)         # 相②：延迟后到
+    assert _callbacks(jk["url"]) == []  # 相①：未到
+    _wait_got(lambda: len(_callbacks(jk["url"])) == 1)  # 相②：延迟后到
     assert len(jk["cap"].received) == 1

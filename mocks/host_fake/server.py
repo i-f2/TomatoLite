@@ -10,6 +10,7 @@
 Jenkins/GitLab mock 的同族纪律：config 逐键校验（坏值 400 零写入）、reset 连
 配置、`_control` 面永不被注入、响应写包 `except OSError`。
 """
+
 from __future__ import annotations
 
 import json
@@ -58,7 +59,11 @@ class _AppHandler(BaseHTTPRequestHandler):
             mode = st.effective_app_mode()
             path = self.path.partition("?")[0]
             if path == "/version":
-                status, body, ctype = 200, json.dumps({"version": st.get_version()}).encode(), "application/json"
+                status, body, ctype = (
+                    200,
+                    json.dumps({"version": st.get_version()}).encode(),
+                    "application/json",
+                )
             else:
                 status = st.config["http_status"]
                 body = st.config["http_body"].encode()
@@ -160,7 +165,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
             host.state.config.update(body)
             if "version" in body:
                 host.state._write_version(body["version"])
-        host.apply_app()   # 幂等；http_mode/process_alive 变化在此兑现到 listener
+        host.apply_app()  # 幂等；http_mode/process_alive 变化在此兑现到 listener
         host.apply_tcp()
         with host.state.lock:
             self._json(200, dict(host.state.config))
@@ -190,12 +195,17 @@ class HostSim:
     URL 按端口钉死，换端口=谎报另一台机器）。
     """
 
-    def __init__(self, addr: str = "127.0.0.1", app_port: int = 0,
-                 tcp_port: int = 0, control_port: int = 0,
-                 state: State | None = None,
-                 ssh_authorized_keys_path: str | None = None,
-                 ssh_host_key_path: str | None = None,
-                 ssh_port: int = 0):
+    def __init__(
+        self,
+        addr: str = "127.0.0.1",
+        app_port: int = 0,
+        tcp_port: int = 0,
+        control_port: int = 0,
+        state: State | None = None,
+        ssh_authorized_keys_path: str | None = None,
+        ssh_host_key_path: str | None = None,
+        ssh_port: int = 0,
+    ):
         self.addr = addr
         self.state = state or State()
         self.ssh = None
@@ -210,9 +220,11 @@ class HostSim:
         self.control_port = self._ctl.server_address[1]
         self._ctl_thread = _serve(self._ctl)
         if ssh_authorized_keys_path:
-            from .ssh import SshEndpoint       # 延迟 import：不开 SSH 的用法不拖 asyncssh
-            self.ssh = SshEndpoint(self.state, addr, ssh_port,
-                                   ssh_authorized_keys_path, ssh_host_key_path)
+            from .ssh import SshEndpoint  # 延迟 import：不开 SSH 的用法不拖 asyncssh
+
+            self.ssh = SshEndpoint(
+                self.state, addr, ssh_port, ssh_authorized_keys_path, ssh_host_key_path
+            )
         self.apply_app()
         self.apply_tcp()
 
@@ -229,13 +241,18 @@ class HostSim:
     def info(self) -> dict:
         with self.state.lock:
             eff = self.state.effective_app_mode()
-        return {"app_port": self.app_port, "tcp_port": self.tcp_port,
-                "control_port": self.control_port,
-                "ssh_port": self.ssh.port if self.ssh else None,
-                "app_listening": self._app is not None, "effective_app_mode": eff,
-                "log_path": self.state.log_path, "log_rotated_path": self.state.log_rotated_path,
-                "version_path": self.state.version_path,
-                "process_alive": self.state.config["process_alive"]}
+        return {
+            "app_port": self.app_port,
+            "tcp_port": self.tcp_port,
+            "control_port": self.control_port,
+            "ssh_port": self.ssh.port if self.ssh else None,
+            "app_listening": self._app is not None,
+            "effective_app_mode": eff,
+            "log_path": self.state.log_path,
+            "log_rotated_path": self.state.log_rotated_path,
+            "version_path": self.state.version_path,
+            "process_alive": self.state.config["process_alive"],
+        }
 
     # ---- 联动面 ----
 
@@ -251,9 +268,9 @@ class HostSim:
         elif not want_listening and self._app is not None:
             httpd, thread = self._app, self._app_thread
             self._app, self._app_thread = None, None
-            httpd.shutdown()          # 让 serve_forever 线程干净退出（poll 0.5s）
+            httpd.shutdown()  # 让 serve_forever 线程干净退出（poll 0.5s）
             thread.join(timeout=3)
-            httpd.server_close()      # listener 关闭→后续连接内核回 RST
+            httpd.server_close()  # listener 关闭→后续连接内核回 RST
 
     def apply_tcp(self) -> None:
         want = self.state.config["tcp_listen"]
@@ -267,7 +284,7 @@ class HostSim:
             threading.Thread(target=self._tcp_loop, args=(s,), daemon=True).start()
         elif not want and self._tcp_sock is not None:
             s, self._tcp_sock = self._tcp_sock, None
-            s.close()                 # accept 线程收 OSError 自灭
+            s.close()  # accept 线程收 OSError 自灭
 
     @staticmethod
     def _tcp_loop(s: socket.socket) -> None:
@@ -276,7 +293,7 @@ class HostSim:
                 conn, _ = s.accept()
             except OSError:
                 break
-            conn.close()              # "端口开"=握手即接受即关，无应用语义
+            conn.close()  # "端口开"=握手即接受即关，无应用语义
 
     def close(self) -> None:
         if self.ssh:

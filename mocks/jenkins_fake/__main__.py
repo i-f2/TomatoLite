@@ -1,7 +1,8 @@
 """独立进程入口（拍板①：主机进程，不进 compose；端口与 gitlab_fake 8061 错开）：
 
-    python -m mocks.jenkins_fake --port 8062
+python -m mocks.jenkins_fake --port 8062
 """
+
 import argparse
 
 from .server import make_server

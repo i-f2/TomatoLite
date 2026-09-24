@@ -2,6 +2,7 @@
 
 与 api_reader 同一 DTO 出口——验证引擎对两种读法零分支（§6 第 2 条的同族纪律）。
 """
+
 from __future__ import annotations
 
 from .interface import K8sStateReader

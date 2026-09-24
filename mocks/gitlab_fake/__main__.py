@@ -1,7 +1,8 @@
 """独立进程入口（拍板①：主机进程，不进 compose）：
 
-    python -m mocks.gitlab_fake --port 8061
+python -m mocks.gitlab_fake --port 8061
 """
+
 import argparse
 
 from .server import make_server

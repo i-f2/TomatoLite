@@ -5,6 +5,7 @@
 注入只打数据面（/job、/queue），**_control 面永不被注入**——否则开关关不回去。
 Jenkins 认证被模拟为"来者不拒"（真实凭据差异归 S0-9 人工层）。
 """
+
 from __future__ import annotations
 
 import json
@@ -16,10 +17,10 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from apps.core import hmac as tl_hmac     # §6 第 3 条：签名单一实现来自生产侧
+from apps.core import hmac as tl_hmac  # §6 第 3 条：签名单一实现来自生产侧
 from .state import DEFAULT_CONFIG, State
 
-WRONG_SECRET = "WRONG-SECRET"             # bad_signature 开关的错密钥（不是随机字节垃圾）
+WRONG_SECRET = "WRONG-SECRET"  # bad_signature 开关的错密钥（不是随机字节垃圾）
 
 
 def _v_int0(v):
@@ -43,8 +44,9 @@ _VALIDATORS = {
     "rest_status": _v_http,
     "stop_status": _v_http,
     "notify_url": lambda v: v is None or isinstance(v, str),
-    "callback_drop_rate": lambda v: (isinstance(v, (int, float))
-                                     and not isinstance(v, bool) and 0 <= v <= 1),
+    "callback_drop_rate": lambda v: (
+        isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1
+    ),
     "callback_seed": lambda v: isinstance(v, int) and not isinstance(v, bool),
     "callback_repeat": lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 1,
     "bad_signature": lambda v: isinstance(v, bool),
@@ -85,8 +87,8 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        for i in range(0, len(body), CONSOLE_CHUNK):      # 分块写——大响应不憋一坨
-            self.wfile.write(body[i:i + CONSOLE_CHUNK])
+        for i in range(0, len(body), CONSOLE_CHUNK):  # 分块写——大响应不憋一坨
+            self.wfile.write(body[i : i + CONSOLE_CHUNK])
 
     def _read_raw(self) -> bytes:
         n = int(self.headers.get("Content-Length") or 0)
@@ -105,7 +107,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
                 self._json(200, dict(self.state.config))
             return
         if (path.startswith("/job/") or path.startswith("/queue/")) and self._fault_gate():
-            return                                   # 注入只打数据面，_control 面永不中
+            return  # 注入只打数据面，_control 面永不中
         m = _JOB_RE.match(path)
         if m:
             self._get_job(urllib.parse.unquote(m.group(1)))
@@ -116,8 +118,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
             return
         m = _BUILD_RE.match(path)
         if m:
-            self._get_build(urllib.parse.unquote(m.group(1)), int(m.group(2)),
-                            m.group(3))
+            self._get_build(urllib.parse.unquote(m.group(1)), int(m.group(2)), m.group(3))
             return
         self._json(404, {"message": "No such endpoint"})
 
@@ -128,30 +129,41 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
                 self._json(404, {"message": f"No such job: {job}"})
                 return
             last = builds[-1]
-            self._json(200, {
-                "name": job,
-                "url": f"http://{self.headers.get('Host', '')}/job/{job}/",
-                "lastBuild": {"number": last["number"], "url": last["url"]},
-                "builds": [{"number": b["number"], "url": b["url"]} for b in builds],
-            })
+            self._json(
+                200,
+                {
+                    "name": job,
+                    "url": f"http://{self.headers.get('Host', '')}/job/{job}/",
+                    "lastBuild": {"number": last["number"], "url": last["url"]},
+                    "builds": [{"number": b["number"], "url": b["url"]} for b in builds],
+                },
+            )
 
     def _get_queue(self, qid: int) -> None:
         with self.state.lock:
             q = self.state.queue_item(qid)
-            if q is None:                                   # vanish / 未知 / 被清出
+            if q is None:  # vanish / 未知 / 被清出
                 self._json(404, {"message": f"No such queue item: {qid}"})
                 return
-            self._json(200, {
-                "id": q["id"],
-                "why": q["why"],
-                "cancelled": q["cancelled"],
-                "task": {"name": q["job"]},
-                "inQueueSince": q["in_queue_since"],
-                # 队列期 executable=null 是显式契约（§3.8），不是缺字段
-                "executable": None if q["exec"] is None
-                else {"number": q["exec"],
-                      "url": f"http://{self.headers.get('Host', '')}/job/{q['job']}/{q['exec']}/"},
-            })
+            self._json(
+                200,
+                {
+                    "id": q["id"],
+                    "why": q["why"],
+                    "cancelled": q["cancelled"],
+                    "task": {"name": q["job"]},
+                    "inQueueSince": q["in_queue_since"],
+                    # 队列期 executable=null 是显式契约（§3.8），不是缺字段
+                    "executable": (
+                        None
+                        if q["exec"] is None
+                        else {
+                            "number": q["exec"],
+                            "url": f"http://{self.headers.get('Host', '')}/job/{q['job']}/{q['exec']}/",
+                        }
+                    ),
+                },
+            )
 
     def _get_build(self, job: str, number: int, view: str) -> None:
         with self.state.lock:
@@ -160,28 +172,33 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
                 self._json(404, {"message": f"No such build: {job}#{number}"})
                 return
             if view == "api/json":
-                self._json(200, {
-                    "number": b["number"], "url": b["url"],
-                    "building": b["building"],
-                    # 关键区分（§3.8）：building=true 时 result=null——显式在，非缺键
-                    "result": None if b["building"] else b["result"],
-                    "duration": b["duration"], "timestamp": b["timestamp"],
-                    "displayName": self.state.display_name(b),
-                    "actions": self.state.actions(b),
-                    "changeSet": {"items": [{"commitId": b["commit_sha"]}]
-                                  if b["commit_sha"] else []},
-                })
+                self._json(
+                    200,
+                    {
+                        "number": b["number"],
+                        "url": b["url"],
+                        "building": b["building"],
+                        # 关键区分（§3.8）：building=true 时 result=null——显式在，非缺键
+                        "result": None if b["building"] else b["result"],
+                        "duration": b["duration"],
+                        "timestamp": b["timestamp"],
+                        "displayName": self.state.display_name(b),
+                        "actions": self.state.actions(b),
+                        "changeSet": {
+                            "items": [{"commitId": b["commit_sha"]}] if b["commit_sha"] else []
+                        },
+                    },
+                )
             elif view == "consoleText":
                 text = self.state.console_text(b).encode()
                 self._bytes(200, text, "text/plain; charset=utf-8")
             else:  # wfapi/describe
-                self._json(200, {"id": f"{job}#{number}",
-                                 "stages": self.state.stages(b)})
+                self._json(200, {"id": f"{job}#{number}", "stages": self.state.stages(b)})
 
     # ---- POST ----
 
     def do_POST(self) -> None:
-        raw = self._read_raw()      # 一律先排空（keep-alive 纪律，同 gitlab_fake）
+        raw = self._read_raw()  # 一律先排空（keep-alive 纪律，同 gitlab_fake）
         path, _, query = self.path.partition("?")
         if path in ("/_control/reset", "/_control/reset/"):
             self.state.reset()
@@ -202,7 +219,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
             self._post_config(body if isinstance(body, dict) else {})
             return
         if (path.startswith("/job/") or path.startswith("/queue/")) and self._fault_gate():
-            return                                   # 请求体已排空，keep-alive 不串
+            return  # 请求体已排空，keep-alive 不串
         m = _TRIGGER_RE.match(path)
         if m:
             self._trigger(urllib.parse.unquote(m.group(1)), raw, query)
@@ -246,8 +263,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
         # buildWithParameters 的参数：query 为准，urlencoded body 补充（Jenkins 两种都吃）
         body_p = urllib.parse.parse_qs(raw.decode("utf-8", "replace"))
         query_p = urllib.parse.parse_qs(query)
-        params = {**{k: v[-1] for k, v in body_p.items()},
-                  **{k: v[-1] for k, v in query_p.items()}}
+        params = {**{k: v[-1] for k, v in body_p.items()}, **{k: v[-1] for k, v in query_p.items()}}
         out = self.state.trigger(job, params)
         if out == "no_job":
             self._json(404, {"message": f"No such job: {job}"})
@@ -265,15 +281,14 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
             time.sleep(hold / 1000)
         try:
             self.send_response(201)
-            self.send_header("Location",
-                             f"http://{self.headers.get('Host', '')}/queue/item/{qid}/")
+            self.send_header("Location", f"http://{self.headers.get('Host', '')}/queue/item/{qid}/")
             body = json.dumps({"queue_id": qid}).encode()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
         except OSError:
-            pass   # hold 超客户端超时=先挂：队列/构建/回调照常，201 写不出去不作紧
+            pass  # hold 超客户端超时=先挂：队列/构建/回调照常，201 写不出去不作紧
         # 201 不回报 build_no——§3.6 边 31 的"绝不猜 build_no"在 mock 层同步成立，
         # 唯一出处是 Location 的 queue_id，映射只能走 /queue/item/{id}/api/json
 
@@ -295,16 +310,15 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
                 "result": b["result"],
                 "building": b["building"],
                 "duration": b["duration"],
-                "timestamp": b["timestamp"],      # epoch ms（§3.6：只用它算 duration）
+                "timestamp": b["timestamp"],  # epoch ms（§3.6：只用它算 duration）
                 "displayName": self.state.display_name(b),
                 "actions": self.state.actions(b),
-                "changeSet": {"items": [{"commitId": b["commit_sha"]}]
-                              if b["commit_sha"] else []},
+                "changeSet": {"items": [{"commitId": b["commit_sha"]}] if b["commit_sha"] else []},
             }
 
     def _stop(self, job: str, number: int) -> None:
         forced = self.state.config["stop_status"]
-        if forced:      # M2-34 "stop 失败不阻塞终止"素材：500 且**不执行中止**
+        if forced:  # M2-34 "stop 失败不阻塞终止"素材：500 且**不执行中止**
             self._json(int(forced), {"message": f"mock stop injected {forced}"})
             return
         outcome = self.state.stop(job, number)
@@ -312,7 +326,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
             self._json(404, {"message": f"cannot stop {job}#{number}: {outcome}"})
             return
         if outcome == "aborted":
-            self._on_settled(job, number)      # 中止同样出终态事件
+            self._on_settled(job, number)  # 中止同样出终态事件
         self._json(200, {"ok": True, "outcome": outcome})  # 'already' 也 200（§0.4 裁定）
 
     def _on_settled(self, job: str, number: int) -> None:
@@ -333,19 +347,25 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
         payload = self._finished_payload(job, number)
         if payload is None:
             return
-        secret = WRONG_SECRET if self.state.config["bad_signature"] \
-            else self.state.config["secret"]
+        secret = WRONG_SECRET if self.state.config["bad_signature"] else self.state.config["secret"]
         drop = self.state.config["callback_drop_rate"]
         for _ in range(max(1, self.state.config["callback_repeat"])):
             if drop > 0:
                 with self.state.lock:
                     hit = self.state.rng.random() < drop
-                if hit:   # 丢了也要如实记——否则 drop 开关自己就成了不可断言的黑洞
+                if hit:  # 丢了也要如实记——否则 drop 开关自己就成了不可断言的黑洞
                     with self.state.lock:
                         self.state.callbacks.append(
-                            {"url": self.state.config["notify_url"], "event": "build_finished",
-                             "job_full_name": job, "build_number": number,
-                             "result": payload["result"], "status": "DROPPED", "dropped": True})
+                            {
+                                "url": self.state.config["notify_url"],
+                                "event": "build_finished",
+                                "job_full_name": job,
+                                "build_number": number,
+                                "result": payload["result"],
+                                "status": "DROPPED",
+                                "dropped": True,
+                            }
+                        )
                     continue
             self._deliver_signed(self.state.config["notify_url"], payload, secret)
 
@@ -357,19 +377,29 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
         sig = tl_hmac.sign(secret, ts, raw)
         try:
             req = urllib.request.Request(
-                target, data=raw, method="POST",
-                headers={"Content-Type": "application/json",
-                         tl_hmac.SIG_HEADER: sig,
-                         tl_hmac.TS_HEADER: str(ts)})
+                target,
+                data=raw,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    tl_hmac.SIG_HEADER: sig,
+                    tl_hmac.TS_HEADER: str(ts),
+                },
+            )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 delivery = {"status": resp.status}
         except Exception as e:  # noqa: BLE001 —— 接收器的错如实记，不吞
             delivery = {"status": getattr(e, "code", 0), "error": str(e)}
-        rec = {"url": target, "event": payload.get("event"),
-               "job_full_name": payload.get("job_full_name"),
-               "build_number": payload.get("build_number"),
-               "result": payload.get("result"), "ts": ts, "sig": sig,
-               **delivery}
+        rec = {
+            "url": target,
+            "event": payload.get("event"),
+            "job_full_name": payload.get("job_full_name"),
+            "build_number": payload.get("build_number"),
+            "result": payload.get("result"),
+            "ts": ts,
+            "sig": sig,
+            **delivery,
+        }
         with self.state.lock:
             self.state.callbacks.append(rec)
         return rec
@@ -394,8 +424,7 @@ class MockJenkinsHandler(BaseHTTPRequestHandler):
         if not target:
             self._json(400, {"message": "no target url (body.url or config.notify_url)"})
             return
-        secret = WRONG_SECRET if body.get("bad_signature") \
-            else self.state.config["secret"]
+        secret = WRONG_SECRET if body.get("bad_signature") else self.state.config["secret"]
         rec = self._deliver_signed(target, payload, secret)
         self._json(200, {"emitted": True, "delivery": rec, "payload": payload})
 

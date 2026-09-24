@@ -7,6 +7,7 @@ S0-5：自定义 User（PRD §3 四角色 + system 服务身份）。角色序
 business < dev < ops < admin；system 不入序（逐位点显式放行，见 rbac.role_at_least）。
 `role` **必填无默认**——安全字段不兜底，漏传必炸建/校验，不做静默降级。
 """
+
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import UserManager as _AuthUserManager
 from django.db import models
@@ -38,8 +39,8 @@ class AbstractBaseModel(models.Model):
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteManager()      # 默认：隐藏已软删
-    all_objects = models.Manager()     # 全量：审计 / 回收站 / 唯一性复活判断
+    objects = SoftDeleteManager()  # 默认：隐藏已软删
+    all_objects = models.Manager()  # 全量：审计 / 回收站 / 唯一性复活判断
 
     class Meta:
         abstract = True
@@ -94,7 +95,7 @@ class User(AbstractUser, AbstractBaseModel):
 
     role = models.CharField(max_length=16, choices=Role.choices)  # 必填，无默认
 
-    objects = UserManager()         # 软删口 ∧ auth 协议口（见 UserManager docstring）
+    objects = UserManager()  # 软删口 ∧ auth 协议口（见 UserManager docstring）
     all_objects = models.Manager()  # 全量口：审计 / 用户名占位判断
 
     class Meta(AbstractUser.Meta):

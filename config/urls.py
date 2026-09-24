@@ -4,8 +4,16 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from .views import healthz
 
 # S0-4：每 app 挂载在 /api/<name>/，占位 health 端点 → /api/<name>/health/
-API_APPS = ["core", "cmdb", "tickets", "channels_a", "channels_b",
-            "verification", "feedback", "metrics"]
+API_APPS = [
+    "core",
+    "cmdb",
+    "tickets",
+    "channels_a",
+    "channels_b",
+    "verification",
+    "feedback",
+    "metrics",
+]
 
 urlpatterns = [
     path("healthz/", healthz),

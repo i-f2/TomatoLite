@@ -1,4 +1,5 @@
 """JenkinsProvider 抽象（§0.4 签名逐一对应）。"""
+
 from __future__ import annotations
 
 import abc

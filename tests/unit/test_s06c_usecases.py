@@ -10,6 +10,7 @@ Non-Goal：此处以 asyncssh 客户端最小复现代替。
 TIMEOUT_CONNECT 由消费方用 RFC5737 `192.0.2.1` 构造（Spec 拍板③：本机内核
 backlog 会先完成握手，mock 造不出"SYN 无应答"，也绝不假装造得出）。
 """
+
 import asyncio
 import os
 import socket
@@ -21,8 +22,8 @@ import pytest
 from mocks.host_fake import HostSim
 from mocks.host_fake.ssh import APP_PID, gen_key, write_authorized_keys
 
-
 # ---- 探活判料器（§5.4.1 四形状互斥）----
+
 
 def _is_refused(e: BaseException) -> bool:
     """httpcore 内部 `raise exc from None` 会断 __cause__ 链，两路都走。"""
@@ -46,12 +47,12 @@ def _classify_get(url: str, timeout: float = 1.0) -> str:
             r = c.get(url)
     except httpx.ConnectError as e:
         if _is_refused(e):
-            return "CONNECT_REFUSED"            # 内核 RST：端口死=应用挂
+            return "CONNECT_REFUSED"  # 内核 RST：端口死=应用挂
         raise
     except httpx.ConnectTimeout:
-        return "TIMEOUT_CONNECT"                # SYN 无应答：平台够不著
+        return "TIMEOUT_CONNECT"  # SYN 无应答：平台够不著
     except httpx.ReadTimeout:
-        return "TIMEOUT_READ"                   # 连上了永不回：应用吊死
+        return "TIMEOUT_READ"  # 连上了永不回：应用吊死
     return "OK" if r.status_code == 200 else "STATUS_MISMATCH"
 
 
@@ -70,102 +71,118 @@ def _cfg(h: HostSim, **kw):
 
 # ---- SSH 最小复现代（同 test_s06c_ssh 模式：挂起=失败）----
 
+
 @pytest.fixture
 def env(tmp_path):
-    host_key = gen_key(str(tmp_path / "host_ed25519"))
+    gen_key(str(tmp_path / "host_ed25519"))  # 文件是目的；HostSim 按路径加载
     client_key = gen_key(str(tmp_path / "client_ed25519"))
     authk = str(tmp_path / "authorized_keys")
     write_authorized_keys([client_key], authk)
-    host = HostSim(ssh_authorized_keys_path=authk,
-                   ssh_host_key_path=str(tmp_path / "host_ed25519"))
+    host = HostSim(ssh_authorized_keys_path=authk, ssh_host_key_path=str(tmp_path / "host_ed25519"))
     yield {"host": host, "client_key": client_key, "port": host.ssh.port}
     host.close()
 
 
 def _ssh(env, *cmds):
     async def go():
-        async with asyncssh.connect("127.0.0.1", env["port"],
-                                    client_keys=[env["client_key"]],
-                                    known_hosts=None, username="ops") as conn:
+        async with asyncssh.connect(
+            "127.0.0.1",
+            env["port"],
+            client_keys=[env["client_key"]],
+            known_hosts=None,
+            username="ops",
+        ) as conn:
             return [await conn.run(c, check=False) for c in cmds]
+
     return asyncio.run(asyncio.wait_for(go(), timeout=15))
 
 
 # ---- 用例①：§5.4.1 三形状互不混淆（+ 第四形状由消费方构造）----
 
+
 def test_http_probe_shapes_never_conflated():
     h = HostSim()
     try:
         url = f"{h.app_url}/healthz"
-        verdicts = [_classify_get(url)]                       # OK 基线
+        verdicts = [_classify_get(url)]  # OK 基线
         _cfg(h, http_status=503)
-        verdicts.append(_classify_get(url))                   # 应答了但不对
+        verdicts.append(_classify_get(url))  # 应答了但不对
         _cfg(h, http_status=200, http_mode="refuse")
-        verdicts.append(_classify_get(url))                   # 应用挂（RST）
+        verdicts.append(_classify_get(url))  # 应用挂（RST）
         _cfg(h, http_mode="blackhole")
-        verdicts.append(_classify_get(url, timeout=0.5))      # 吊死（连上不回）
+        verdicts.append(_classify_get(url, timeout=0.5))  # 吊死（连上不回）
         verdicts.append(_classify_get("http://192.0.2.1:8099/", timeout=1.0))  # SYN 无应答
-        assert verdicts == ["OK", "STATUS_MISMATCH", "CONNECT_REFUSED",
-                            "TIMEOUT_READ", "TIMEOUT_CONNECT"]
-        assert len(set(verdicts)) == len(verdicts)            # 互斥=可判（冗余强化）
+        assert verdicts == [
+            "OK",
+            "STATUS_MISMATCH",
+            "CONNECT_REFUSED",
+            "TIMEOUT_READ",
+            "TIMEOUT_CONNECT",
+        ]
+        assert len(set(verdicts)) == len(verdicts)  # 互斥=可判（冗余强化）
         # 全等证明之外：refuse/blackhole 期间控制面照常（开关关得回去）
         assert _cfg(h, http_mode="normal").status_code == 200
-        assert _classify_get(url) == "OK"                     # 双相收口：可回
+        assert _classify_get(url) == "OK"  # 双相收口：可回
     finally:
         h.close()
 
 
 # ---- 用例②：TCP 面关闭判失败（端口号恒定，判料不漂移）----
 
+
 def test_tcp_closed_is_failure_not_something_else():
     h = HostSim()
     try:
         port0 = h.tcp_port
-        assert _tcp_probe_ok(h.addr, port0)                   # 开=握手即成（关了即断）
+        assert _tcp_probe_ok(h.addr, port0)  # 开=握手即成（关了即断）
         _cfg(h, tcp_listen=False)
-        assert h.tcp_port == port0                            # 端口恒定=不谎报另一台机器
-        assert not _tcp_probe_ok(h.addr, port0)               # 关=速拒，不是超时
+        assert h.tcp_port == port0  # 端口恒定=不谎报另一台机器
+        assert not _tcp_probe_ok(h.addr, port0)  # 关=速拒，不是超时
         _cfg(h, tcp_listen=True)
-        assert _tcp_probe_ok(h.addr, port0)                   # 双相：关得掉也关得回
+        assert _tcp_probe_ok(h.addr, port0)  # 双相：关得掉也关得回
     finally:
         h.close()
 
 
 # ---- 用例③：进程检查失败判定 + 与 HTTP 面联动的唯一结论 ----
 
+
 def test_process_death_verdict_unique_across_planes(env):
     h = env["host"]
     probes = ["pgrep -f tlapp", "systemctl is-active tlapp", f"kill -0 {APP_PID}"]
-    assert [r.exit_status for r in _ssh(env, *probes)] == [0, 0, 0]   # 活：三口全 0
+    assert [r.exit_status for r in _ssh(env, *probes)] == [0, 0, 0]  # 活：三口全 0
     assert _classify_get(f"{h.app_url}/healthz") == "OK"
     _cfg(h, process_alive=False)
     rc = [r.exit_status for r in _ssh(env, *probes)]
-    assert rc == [1, 3, 1]                                # 死：pgrep/systemd/kill 惯例三口
+    assert rc == [1, 3, 1]  # 死：pgrep/systemd/kill 惯例三口
     # 联动面：进程死 ⇒ 应用端口同判 CONNECT_REFUSED（进程+HTTP 两料同向=可下结论）
     assert _classify_get(f"{h.app_url}/healthz") == "CONNECT_REFUSED"
     _cfg(h, process_alive=True)
-    assert [r.exit_status for r in _ssh(env, *probes)] == [0, 0, 0]   # 双相收口
+    assert [r.exit_status for r in _ssh(env, *probes)] == [0, 0, 0]  # 双相收口
     assert _classify_get(f"{h.app_url}/healthz") == "OK"
 
 
 # ---- 用例④：§5.7③ 日志扫描假阳性双相 + 轮转回退 ----
+
 
 def test_offset_scan_beats_tail_window_on_baseline_error(env):
     """部署基线里已有历史 ERROR：offset 增量判绿，tail 全窗判红——两料本就该不同。"""
     st = env["host"].state
     before = os.stat(st.log_path)
     with open(st.log_path) as f:
-        assert "ERROR" in f.read()                          # 种子=历史假阳性源头
-    httpx.post(f"{env['host'].control_url}/_control/log/append",
-               json={"lines": ["2026-09-24T03:00:00 INFO deploy v9.0.0 ok"]})
+        assert "ERROR" in f.read()  # 种子=历史假阳性源头
+    httpx.post(
+        f"{env['host'].control_url}/_control/log/append",
+        json={"lines": ["2026-09-24T03:00:00 INFO deploy v9.0.0 ok"]},
+    )
     after = os.stat(st.log_path)
-    assert after.st_ino == before.st_ino                    # 未轮转 inode 不变=续读合法
-    with open(st.log_path) as f:                            # offset 消费方：只读新增段
+    assert after.st_ino == before.st_ino  # 未轮转 inode 不变=续读合法
+    with open(st.log_path) as f:  # offset 消费方：只读新增段
         f.seek(before.st_size)
         inc = f.read()
     assert "ERROR" not in inc and "deploy v9.0.0 ok" in inc  # 判绿（正确）
-    win = _ssh(env, "tail -n 50 app.log")[0].stdout         # 全窗消费方
-    assert "legacy crash loop" in win                        # 判红（假阳性）——两料分岔即证据
+    win = _ssh(env, "tail -n 50 app.log")[0].stdout  # 全窗消费方
+    assert "legacy crash loop" in win  # 判红（假阳性）——两料分岔即证据
 
 
 def test_rotation_inode_change_forces_tail_fallback(env):
@@ -178,12 +195,14 @@ def test_rotation_inode_change_forces_tail_fallback(env):
     after = os.stat(st.log_path)
     assert r.json()["inode"] == after.st_ino != before.st_ino
     assert after.st_size == 0
-    with open(st.log_path) as f:                            # 天真续读：旧 offset 读空文件
+    with open(st.log_path) as f:  # 天真续读：旧 offset 读空文件
         f.seek(before.st_size)
-        assert f.read() == ""                               # ← 假绿素材，无 inode 校验就会吞
-    httpx.post(f"{h.control_url}/_control/log/append",
-               json={"lines": ["2026-09-24T03:05:00 ERROR post-rotate boom"]})
-    r = _ssh(env, "tail -n 50 app.log")[0]                  # 正确行为：回退 tail 全窗
-    assert r.exit_status == 0 and "post-rotate boom" in r.stdout   # 判红（正确）
+        assert f.read() == ""  # ← 假绿素材，无 inode 校验就会吞
+    httpx.post(
+        f"{h.control_url}/_control/log/append",
+        json={"lines": ["2026-09-24T03:05:00 ERROR post-rotate boom"]},
+    )
+    r = _ssh(env, "tail -n 50 app.log")[0]  # 正确行为：回退 tail 全窗
+    assert r.exit_status == 0 and "post-rotate boom" in r.stdout  # 判红（正确）
     r = _ssh(env, "cat app.log.1")[0]
-    assert r.exit_status == 0 and "BEFORE deploy" in r.stdout      # 历史随 .1 离场仍可查，不丢料
+    assert r.exit_status == 0 and "BEFORE deploy" in r.stdout  # 历史随 .1 离场仍可查，不丢料

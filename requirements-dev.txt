@@ -1,0 +1,6 @@
+# S0-7 质量门开发依赖（拍板①：生产镜像不含——Dockerfile 只装 requirements.txt）。
+# pre-commit 钩子为 repo:local，直接调本 venv 二进制——工具版本单源于本文件（拍板④）。
+pre-commit==4.6.2
+ruff==0.16.8
+black==26.5.1
+pytest-cov==7.1.0

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Django 管理入口（settings 分片口径见 §0.6，默认 local）。"""
+
 import os
 import sys
 

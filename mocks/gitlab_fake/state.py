@@ -4,6 +4,7 @@ OQ-1 物理分离：入口库与资产库**两个 project**都种进去（§4.7�
 串库的用例素材）。提交原子性：actions 先**整批校验后整批应用**——部分应用再返
 400 会把"幂等守卫"测成谎话（§4.6 核心断言点的前提）。
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -16,10 +17,10 @@ DEFAULT_BRANCH = "main"
 
 DEFAULT_CONFIG = {
     "latency_ms": 0,
-    "rest_status": None,          # 非空 → 数据面端点强制返回该状态码
-    "webhook_timing": "none",     # pre=③ | post=① | none=不发（手动 emit_push 不受影响）
-    "response_hold_ms": 0,        # ②：应用 commit 后按住响应（配合 post 即"落库→超时→webhook"）
-    "auto_emit_url": None,        # 非空且 timing!=none 时，commit 成功即向该 url 发 push
+    "rest_status": None,  # 非空 → 数据面端点强制返回该状态码
+    "webhook_timing": "none",  # pre=③ | post=① | none=不发（手动 emit_push 不受影响）
+    "response_hold_ms": 0,  # ②：应用 commit 后按住响应（配合 post 即"落库→超时→webhook"）
+    "auto_emit_url": None,  # 非空且 timing!=none 时，commit 成功即向该 url 发 push
     "token": "mock-gitlab-token",  # emit 默认 X-Gitlab-Token（请求级可覆盖，供坏 token 用例）
 }
 
@@ -42,8 +43,8 @@ class State:
         self._pushes = itertools.count(1)
         self.projects: dict[int, str] = {}
         self.by_path: dict[str, int] = {}
-        self.files: dict[tuple[int, str, str], dict] = {}   # (pid, branch, path)
-        self.commits: list[dict] = []                        # 新→旧插入
+        self.files: dict[tuple[int, str, str], dict] = {}  # (pid, branch, path)
+        self.commits: list[dict] = []  # 新→旧插入
         self.deliveries: list[dict] = []
         self.config: dict = dict(DEFAULT_CONFIG)
         self.reset()
@@ -104,7 +105,9 @@ class State:
                 "last_commit_id": cid,
             }
 
-    def record_commit(self, pid: int, branch: str, message: str, actions: list[dict], cid: str) -> dict:
+    def record_commit(
+        self, pid: int, branch: str, message: str, actions: list[dict], cid: str
+    ) -> dict:
         commit = {
             "id": cid,
             "title": message.splitlines()[0] if message else "",
@@ -114,12 +117,17 @@ class State:
             "branch": branch,
             "paths": [a["file_path"] for a in actions],
         }
-        self.commits.insert(0, commit)   # 新→旧
+        self.commits.insert(0, commit)  # 新→旧
         return commit
 
     def public_commits(self, pid: int, path: str | None, per_page: int, page: int) -> list[dict]:
-        rows = [c for c in self.commits
-                if c["project_id"] == pid and (path is None or path in c["paths"])]
+        rows = [
+            c
+            for c in self.commits
+            if c["project_id"] == pid and (path is None or path in c["paths"])
+        ]
         start = (page - 1) * per_page
-        return [{"id": c["id"], "title": c["title"], "created_at": c["created_at"]}
-                for c in rows[start:start + per_page]]
+        return [
+            {"id": c["id"], "title": c["title"], "created_at": c["created_at"]}
+            for c in rows[start : start + per_page]
+        ]

@@ -1,4 +1,5 @@
 """GitLab DTOs（§0.4）。纯 stdlib dataclass/enum，零 Django（§0.2 规则 1）。"""
+
 from __future__ import annotations
 
 import dataclasses
@@ -15,7 +16,7 @@ class ActionType(str, enum.Enum):
 class FileInfo:
     path: str
     ref: str
-    content: str          # 文件全文（M1-13 代提交读改写以它为事实源）
+    content: str  # 文件全文（M1-13 代提交读改写以它为事实源）
     blob_sha: str | None = None
 
 
@@ -23,7 +24,7 @@ class FileInfo:
 class CommitAction:
     path: str
     type: ActionType
-    content: str | None = None   # DELETE 时为 None
+    content: str | None = None  # DELETE 时为 None
 
 
 @dataclasses.dataclass(frozen=True)

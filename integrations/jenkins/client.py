@@ -2,6 +2,7 @@
 
 HMAC callback 验签（§3.3）在 feedback 侧消费 JENKINS_CALLBACK_HMAC_KEY，不在本客户端。
 """
+
 from __future__ import annotations
 
 import httpx

@@ -4,6 +4,7 @@
 - `core.slow_probe`：S0-3a 拓扑断言高水位计数（db9，与业务库 db0 分离）。
 任务名不变（`config.probe`→`core.probe` 为唯一改名；S0-3 报告中的旧名以本文注为桥）。
 """
+
 import time
 
 from celery import shared_task
@@ -22,8 +23,9 @@ def probe(payload: str = "") -> str:
 def _counter_redis():
     import redis as _r
 
-    return _r.Redis.from_url(settings.CELERY_BROKER_URL.rsplit("/", 1)[0] + "/9",
-                             decode_responses=True)
+    return _r.Redis.from_url(
+        settings.CELERY_BROKER_URL.rsplit("/", 1)[0] + "/9", decode_responses=True
+    )
 
 
 _HWM_LUA = """

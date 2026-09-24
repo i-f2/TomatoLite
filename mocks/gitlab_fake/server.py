@@ -2,6 +2,7 @@
 
 标准库实现（拍板②零新依赖）。路由按 §4.6 端点表；`_control` 面 Step 2/3 增量。
 """
+
 from __future__ import annotations
 
 import base64
@@ -104,18 +105,21 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         if f is None:
             self._json(404, {"message": "404 File Not Found"})
             return
-        self._json(200, {
-            "file_name": file_path.rsplit("/", 1)[-1],
-            "path": file_path,
-            "size": len(f["content"]),
-            "encoding": "base64",
-            "content": base64.b64encode(f["content"]).decode(),
-            "content_sha256": f["content_sha256"],
-            "ref": ref,
-            "blob_id": f["blob_id"],
-            "commit_id": f["commit_id"],
-            "last_commit_id": f["last_commit_id"],
-        })
+        self._json(
+            200,
+            {
+                "file_name": file_path.rsplit("/", 1)[-1],
+                "path": file_path,
+                "size": len(f["content"]),
+                "encoding": "base64",
+                "content": base64.b64encode(f["content"]).decode(),
+                "content_sha256": f["content_sha256"],
+                "ref": ref,
+                "blob_id": f["blob_id"],
+                "commit_id": f["commit_id"],
+                "last_commit_id": f["last_commit_id"],
+            },
+        )
 
     def _get_commits(self, seg: str, qs: dict) -> None:
         pid = self._resolve_or_404(seg)
@@ -125,16 +129,21 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         per_page = int((qs.get("per_page") or ["20"])[0])
         page = max(int((qs.get("page") or ["1"])[0]), 1)
         with self.state.lock:
-            rows = [c for c in self.state.commits
-                    if c["project_id"] == pid and (path is None or path in c["paths"])]
-        window = rows[(page - 1) * per_page: page * per_page]
-        self._json(200, [{"id": c["id"], "title": c["title"], "created_at": c["created_at"]}
-                         for c in window])
+            rows = [
+                c
+                for c in self.state.commits
+                if c["project_id"] == pid and (path is None or path in c["paths"])
+            ]
+        window = rows[(page - 1) * per_page : page * per_page]
+        self._json(
+            200,
+            [{"id": c["id"], "title": c["title"], "created_at": c["created_at"]} for c in window],
+        )
 
     # ---- POST ----
 
     def do_POST(self) -> None:
-        body = self._read_body()   # 一律先排空请求体——keep-alive 下漏读会串到下一响应
+        body = self._read_body()  # 一律先排空请求体——keep-alive 下漏读会串到下一响应
         path = self.path.partition("?")[0]
         if path == "/_control/reset":
             self.state.reset()
@@ -147,7 +156,7 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
             self._post_config(body)
             return
         if path.startswith("/api/") and self._fault_gate():
-            return                                   # 注入生效：请求体已排空，keep-alive 不串
+            return  # 注入生效：请求体已排空，keep-alive 不串
         m = _COMMITS_RE.match(path)
         if m:
             self._post_commits(m.group(1), body)
@@ -214,16 +223,19 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
                 "git_http_url": f"http://mockgitlab/{self.state.projects[pid]}.git",
                 "default_branch": DEFAULT_BRANCH,
             },
-            "commits": [{
-                "id": c["id"],
-                "message": c["message"],
-                "timestamp": c["created_at"],
-                "url": f"http://mockgitlab/{self.state.projects[pid]}/commit/{c['id']}",
-                "author": {"name": "tl-mock", "email": "tl-mock@example.com"},
-                "added": [p for p in c["paths"]],
-                "modified": [],
-                "removed": [],
-            } for c in commits],
+            "commits": [
+                {
+                    "id": c["id"],
+                    "message": c["message"],
+                    "timestamp": c["created_at"],
+                    "url": f"http://mockgitlab/{self.state.projects[pid]}/commit/{c['id']}",
+                    "author": {"name": "tl-mock", "email": "tl-mock@example.com"},
+                    "added": [p for p in c["paths"]],
+                    "modified": [],
+                    "removed": [],
+                }
+                for c in commits
+            ],
             "total_commits_count": len(commits),
         }
 
@@ -233,11 +245,12 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
             self._json(400, {"message": "unknown project"})
             return
         branch = body.get("branch") or DEFAULT_BRANCH
-        target = body.get("url")          # 缺省=不推送，仅返回 payload（本地断言用）
+        target = body.get("url")  # 缺省=不推送，仅返回 payload（本地断言用）
         token = body.get("token") or self.state.config["token"]
         with self.state.lock:
-            hist = [c for c in self.state.commits
-                    if c["project_id"] == pid and c["branch"] == branch]   # 新→旧
+            hist = [
+                c for c in self.state.commits if c["project_id"] == pid and c["branch"] == branch
+            ]  # 新→旧
             wanted = body.get("commits")
             if wanted is None:
                 if not hist:
@@ -250,7 +263,7 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
                 if missing:
                     self._json(400, {"message": f"unknown commit ids: {missing}"})
                     return
-                picks = [by_id[w] for w in wanted]                          # 给定顺序
+                picks = [by_id[w] for w in wanted]  # 给定顺序
             first_idx = hist.index(picks[0])
             before = hist[first_idx + 1]["id"] if first_idx + 1 < len(hist) else ZERO_SHA
             payload = self._push_payload(pid, branch, picks, before)
@@ -266,8 +279,11 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         接收器的错也要如实记进 deliveries）。"""
         try:
             req = urllib.request.Request(
-                target, data=json.dumps(payload).encode(), method="POST",
-                headers={"Content-Type": "application/json", "X-Gitlab-Token": token})
+                target,
+                data=json.dumps(payload).encode(),
+                method="POST",
+                headers={"Content-Type": "application/json", "X-Gitlab-Token": token},
+            )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return {"url": target, "status": resp.status}
         except Exception as e:  # noqa: BLE001
@@ -277,8 +293,9 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         """commit 成功后的自动推送（§4.6 三时序之 ①②③ 的 webhook 腿）。"""
         cfg = self.state.config
         with self.state.lock:
-            hist = [c for c in self.state.commits
-                    if c["project_id"] == pid and c["branch"] == branch]
+            hist = [
+                c for c in self.state.commits if c["project_id"] == pid and c["branch"] == branch
+            ]
             idx = hist.index(commit)
             before = hist[idx + 1]["id"] if idx + 1 < len(hist) else ZERO_SHA
             payload = self._push_payload(pid, branch, [commit], before)
@@ -299,7 +316,7 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         with self.state.lock:
             err = self.state.validate_actions(pid, branch, actions)
             if err:
-                self._json(400, {"message": err})   # 整批拒，零应用
+                self._json(400, {"message": err})  # 整批拒，零应用
                 return
             cid = self.state.next_commit_id()
             self.state.apply_actions(pid, branch, actions, cid)
@@ -314,11 +331,16 @@ class MockGitLabHandler(BaseHTTPRequestHandler):
         if hold:
             time.sleep(hold / 1000)
         try:
-            self._json(200, {
-                "id": commit["id"], "title": commit["title"], "message": commit["message"],
-                "created_at": commit["created_at"],
-                "web_url": f"http://{self.headers.get('Host', '')}/tl-mock/commit/{commit['id']}",
-            })
+            self._json(
+                200,
+                {
+                    "id": commit["id"],
+                    "title": commit["title"],
+                    "message": commit["message"],
+                    "created_at": commit["created_at"],
+                    "web_url": f"http://{self.headers.get('Host', '')}/tl-mock/commit/{commit['id']}",
+                },
+            )
         except OSError:
             pass  # ②：客户端先挂了——响应写不出去不影响 webhook 腿继续
         if timing == "post" and auto:
