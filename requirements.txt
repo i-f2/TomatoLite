@@ -15,3 +15,7 @@ pytest==9.1.1
 pytest-django==4.14.0
 # S0-4：integrations/ 钦定 HTTP 库（§0.2 规则 1"只准 httpx + 标准库"的兑现件）
 httpx==0.28.1
+# S0-6c：§5.2 `SshTransport` 钦定实现（清单隐含配套，同 httpx 性质；Spec 拍板①）。
+# 本任务仅以「mock SSH 服务端 + 测试客户端」使用；生产 SshTransport 消费方是 M2-10。
+# 传递依赖 cryptography/typing_extensions 均已在位，零连带。
+asyncssh==2.24.0
