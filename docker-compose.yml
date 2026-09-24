@@ -1,0 +1,81 @@
+# S0-3 工程骨架（§0.5 队列拓扑 + §0.6a：PG 不进 compose——用本地 MacPorts 实例）
+# app 服务 = daphne（ASR/WS 一个端口都走它，§2.3 生产同构）；beat 单实例（§0.5 末行）。
+# 注意：worker 容器内不设 FORKED_BY_MULTIPROCESSING——S0-3 Step 3 断言 Linux 侧 prefork 原样可用。
+# S0-3 不依赖 host PG 在容器网络中可达（healthz/schema/probe 均无 DB 触碰）；
+# M1 起若需容器内跑 migrate/查询，再处理 MacPorts listen_addresses——届时按 §0.6a 口径评审。
+
+x-app-env: &app-env
+  DJANGO_SETTINGS_MODULE: config.settings.local
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  DATABASE_URL: postgres://postgres@host.docker.internal:5432/tomatolite_dev
+
+x-app-base: &app-base
+  build: .
+  env_file: .env
+  environment: *app-env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: tl-redis7
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - tl-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  app:
+    <<: *app-base
+    container_name: tl-app
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz/', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+  worker_callback:  # §0.5：短任务高优先，绝不与 ansible 共池
+    <<: *app-base
+    container_name: tl-worker-callback
+    command: ["celery", "-A", "config", "worker", "-Q", "callback.process",
+              "-n", "callback@tl", "--concurrency=8", "--loglevel=INFO"]
+
+  worker_runner:  # §0.5：--prefetch-multiplier=1 是硬约束（默认 4 会把并发 3 放大成 12）
+    <<: *app-base
+    container_name: tl-worker-runner
+    command: ["celery", "-A", "config", "worker", "-Q", "exec.runner",
+              "-n", "runner@tl", "--concurrency=3", "--prefetch-multiplier=1", "--loglevel=INFO"]
+
+  worker_verify:
+    <<: *app-base
+    container_name: tl-worker-verify
+    command: ["celery", "-A", "config", "worker", "-Q", "verify.runner",
+              "-n", "verify@tl", "--concurrency=4", "--loglevel=INFO"]
+
+  worker_default:  # sweeper/notify/default 共池（§0.5 末行）
+    <<: *app-base
+    container_name: tl-worker-default
+    command: ["celery", "-A", "config", "worker", "-Q", "sweeper,notify,default",
+              "-n", "default@tl", "--concurrency=4", "--loglevel=INFO"]
+
+  beat:  # 单实例——sweeper 双发防线（§0.5）
+    <<: *app-base
+    container_name: tl-beat
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO"]
+
+volumes:
+  tl-redis-data:

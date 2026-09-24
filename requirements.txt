@@ -1,0 +1,15 @@
+# TomatoLite 后端依赖（S0-3 骨架；解析实据 = 本机 py3.12.13，2026-09-24）
+# 版本系 S0-2 spike 实证栈（docs/spikes/s0-2/requirements.txt）同代次解析所得
+# 注：不用 celery[redis] extras——其 pin 的 redis-py 上限 <8；S0-2 实据组合是裸 celery + redis-py 8 直跑 broker
+Django==6.1.1
+djangorestframework==3.18.1
+drf-spectacular==0.30.0
+django-environ==0.14.0
+celery==5.6.3
+channels==4.3.2
+channels-redis==4.3.0
+daphne==4.2.3
+redis==8.1.0
+psycopg[binary]==3.3.6
+pytest==9.1.1
+pytest-django==4.14.0

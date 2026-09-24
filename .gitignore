@@ -1,0 +1,10 @@
+# S0-3 骨架基线（implementation-plan S0-3 行"密钥交付物"条款的最小集）
+.env
+var/
+__pycache__/
+node_modules/
+# 本地虚拟环境与测试/构建残迹
+.venv/
+.pytest_cache/
+*.pyc
+staticfiles/

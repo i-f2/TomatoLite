@@ -1,0 +1,8 @@
+.venv
+.env
+docs
+tests
+.git
+.claude
+__pycache__
+*.pyc
