@@ -1,0 +1,83 @@
+# S0-9 本地**临时**联调栈（§0.6b）：真 GitLab CE + 真 Jenkins，人工联调与里程碑演示用。
+# 定位纪律（§6 第 7 条）：它验证"我们对真系统的假设对不对"；Mock 层（S0-6a/b/c）验证
+# "系统在坏情况下不撒谎"。**任何 CI 用例/自动断言不得依赖本栈**——它随时可 `down -v`。
+# 与 S0-3 的 docker-compose.yml 是两个工程（project name 独立），可并存。
+#
+# 钉版（拍板①，2026-09-24 实查 Hub tag 存在性）：
+#   gitlab/gitlab-ce:19.4.1-ce.0  ·  jenkins/jenkins:2.568.3-lts-jdk21  —— 禁 :latest。
+# 密钥（拍板⑤，§0.6 同族）：compose 插值全部 ${VAR:?} 无默认值，值只落 .env（gitignored）。
+# 网络（实据）：tl-app 已发布 127.0.0.1:8000，容器经 host.docker.internal:8000 可达
+# （Step 1 前实测 healthz 200）——webhook/回调出站目标即此路径。
+# 内存：本机 Docker VM 8.3GB 且 S0-3 栈常驻——GitLab 侧 puma worker=0、关 Prometheus
+# 全家与附属服务，压到 ~3.5GB 量级；仍不足即 Hard Stop，不硬撑。
+name: tl-s09
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:19.4.1-ce.0
+    container_name: tl-gitlab
+    hostname: gitlab.s09.local
+    shm_size: 256m # omnibus 硬要求，低了 502
+    ports:
+      # **omnibus 实据一课**：nginx 监听端口=external_url 里的端口（8929），不是 80——
+      # 8929:80 映射会永远 connection-refused（Step 1 现场撞出：容器内 :8929 readiness
+      # 200、:80 拒连）。外部口径不变：宿主仍是 .env.example 预留的 8929。
+      - "127.0.0.1:8929:8929" # 绑环回=只本机可触
+    environment:
+      GITLAB_ROOT_PASSWORD: ${TL_S09_GITLAB_ROOT_PASSWORD:?见 .env.example 槽位}
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        # ---- 小内存调优（临时栈不做 HA/监控/页服务）----
+        puma['worker_processes'] = 0
+        sidekiq['max_concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+        gitlab_kas['enable'] = false
+        alertmanager['enable'] = false
+        gitlab_pages['enable'] = false
+        manage_accounts['enable'] = false
+        # 一次性本地栈：不开 TLS、注册表/容器 Registry 无关（§4 通道 A 只用 REST+webhook）
+        registry['enable'] = false
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    healthcheck:
+      # readiness 对 localhost 免鉴权（omnibus 内建口径）；curl 由镜像自带；
+      # 端口必须显式 8929——同上实据，omnibus 不在 80 监听。
+      # **第二课**：readiness 按源 IP 白名单只放行 localhost——宿主经端口映射访问
+      # /-/readiness 得 404（不是拒连：HTTP 已在服务，只是监控端点隐身）。宿主侧
+      # 可达性口径用 /users/sign_in（Step 1 实测 200），readiness 以本 healthcheck
+      # （容器内 127.0.0.1）+ docker inspect Status=healthy 为权威。
+      test: ["CMD", "curl", "-sf", "http://localhost:8929/-/readiness"]
+      interval: 15s
+      timeout: 10s
+      retries: 40 # 首启 3–6 分钟：40×15s=10min 上限，超时=如实失败
+      start_period: 60s
+
+  jenkins:
+    image: jenkins/jenkins:2.568.3-lts-jdk21
+    container_name: tl-jenkins
+    ports:
+      - "127.0.0.1:8920:8080" # .env.example 预留位；不发布 agent 50000（无 agent 拓扑）
+    environment:
+      JAVA_OPTS: "-Xmx768m"
+      # 构建尾步回调签名用（§3.3 口径）：容器 env → jenkins 进程 → build step 继承
+      JENKINS_CALLBACK_HMAC_KEY: ${JENKINS_CALLBACK_HMAC_KEY:?见 .env.example 槽位}
+    volumes:
+      - jenkins-data:/var/jenkins_home
+    healthcheck:
+      # 镜像内 curl/wget 不作保证——bash /dev/tcp 探端口存活，HTTP 语义由宿主侧断言。
+      # **第七课**：正因探测口径是 TCP，`healthy` 早于 Jetty 的 HTTP 就绪——重建现场
+      # 实测 healthy 后 GET /login 仍 503（"Starting Jenkins"）。宿主侧消费方
+      # （s0_9_bootstrap.py）对 /login 轮询至 200 再走登录链，不把本 healthcheck 当 HTTP 就绪用。
+      test: ["CMD-SHELL", 'timeout 3 bash -c "</dev/tcp/localhost/8080"']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:
+  jenkins-data:
