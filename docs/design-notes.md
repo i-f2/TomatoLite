@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 工程设计说明（Design Notes） |
-| 版本 | v0.8（设计评审稿） |
+| 版本 | v0.9（设计评审稿） |
 | 日期 | 2026-09-24 |
 | 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
 | 配套文档 | `docs/implementation-plan.md`（实施进度总表） |
-| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`）。v0.7 = 第六轮（§7）：**S0-2 spike 实据修订 §2.3/§2.4**（F-6：channel layer 无尺寸兜底，excerpt + 帧字节预算双护栏落为应用层自有责任），迁移表 31 边两版均不动。v0.8 = 第七轮（§7）：**§0.5 措辞按 S0-3a 拓扑断言实据修订**（F-7：prefetch 放大的是未 ack 预取**占用**条数、非同时执行数——`-c` 硬顶与 `--prefetch-multiplier=1` 硬约束均不变），迁移表 31 边仍零触碰 |
+| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`）。v0.7 = 第六轮（§7）：**S0-2 spike 实据修订 §2.3/§2.4**（F-6：channel layer 无尺寸兜底，excerpt + 帧字节预算双护栏落为应用层自有责任），迁移表 31 边两版均不动。v0.8 = 第七轮（§7）：**§0.5 措辞按 S0-3a 拓扑断言实据修订**（F-7：prefetch 放大的是未 ack 预取**占用**条数、非同时执行数——`-c` 硬顶与 `--prefetch-multiplier=1` 硬约束均不变），迁移表 31 边仍零触碰。v0.9 = 第八轮（§7）：**§0.6a 版本基线按 S0-5 实据修订**（F-8：Django 6.1.1 连接层硬下限 `minimum_database_version=(15,)` 与"≥14"基线不相容——基线改 ≥15、本机升 PG16、S0-8 断言改 `>=15`），迁移表 31 边与任务表 101 条仍零触碰 |
 
 ---
 
@@ -127,13 +127,13 @@ PostgreSQL 使用**本地已安装的实例**（MacPorts），不进 `docker-com
 
 | 项 | 口径 |
 |---|---|
-| 客户端 | `/opt/local/bin/psql14 -U postgres -d postgres`（运维/排查时手查事件表用的就是它，DoD 里出现 `psql14` 即指此路径） |
+| 客户端 | `/opt/local/bin/psql16 -U postgres -d postgres`（运维/排查时手查事件表用的就是它，DoD 里出现 `psql16` 即指此路径；F-8 起替代 `psql14`，§7 第八轮） |
 | 开发库 | `DATABASE_URL=postgres://postgres@localhost:5432/tomatolite_dev` |
 | 测试库 | Django test runner 自动建 `test_tomatolite_*`，依赖 `postgres` 角色的 `CREATEDB`（superuser 默认具备，勿回收） |
-| **版本基线** | **≥ 14**。本文档使用的全部 PG 特性（JSONB / 部分唯一索引 / `FOR UPDATE SKIP LOCKED` / 事务级 advisory lock / `REVOKE UPDATE` / `Now()` 表达式）均为 9.x 时代特性，14 全兼容，已逐条核对 |
-| 基线纪律 | 引入 **15+/16-only 语法（如 `MERGE`、`uuidv7()`）前，必须先在本节上调基线并记入 §7**，否则本地全绿、生产按锁定的版本炸 |
+| **版本基线** | **≥ 15**（F-8 起，v0.9；原"≥14"证伪，见 §7 第八轮）。下限由**框架硬约束**驱动：Django 6.1.1 PG 后端 `minimum_database_version = (15,)`，低于 15 在建连时即 `NotSupportedError`、无 settings 可绕。本文档使用的全部 PG 特性（JSONB / 部分唯一索引 / `FOR UPDATE SKIP LOCKED` / 事务级 advisory lock / `REVOKE UPDATE` / `Now()` 表达式）在 15 全兼容（原逐条对 14 的核对结论向下继承） |
+| 基线纪律 | 引入 **高于当前基线的版本才有的语法（如 `uuidv7()`，PG18）前，必须先在本节上调基线并记入 §7**，否则本地全绿、生产按锁定的版本炸。`MERGE`（PG15）随新基线解禁，但 §1.4 append-only 口径下无使用场景，**不鼓励** |
 
-`S0-8` 的启动断言相应为：`connection.vendor == 'postgresql'` **且 `server_version >= 14`**。
+`S0-8` 的启动断言相应为：`connection.vendor == 'postgresql'` **且 `server_version >= 15`**。
 
 ### 0.6b 本地临时联调栈（docker/compose）
 
@@ -1281,7 +1281,7 @@ def evaluate(run: VerificationRun) -> Conclusion:
 
 4. **假服务必须自带 `_control` 与故障注入**，且必须能构造"落库成功但响应超时""webhook 早于 API 响应"这两类时序——它们分别是 §4.2 幂等守卫与 §4.4 关联逻辑的**唯一有效测试手段**。
 
-5. **本地也强制 PostgreSQL**（见 §0.6）——用本地已装实例（≥14，非容器），见 §0.6a。
+5. **本地也强制 PostgreSQL**（见 §0.6）——用本地已装实例（≥15，非容器，F-8 起），见 §0.6a。
 
 6. **并发测试用 `TransactionTestCase` + 真实线程**（见 §0.7）。
 
@@ -1432,3 +1432,13 @@ S0-3a Step 2（故障注入段）首跑：正例绿（12×3s → `max_active==3`
 | F-7 | §0.5：「一个 prefork 子进程会一次性预取 4 个任务；并发上限 3 实际同时跑 12 个」——即 prefetch 放大**同时执行数** | prefetch=1（正常 runner）：`LLEN=6, reserved=3, max_active=3`，排空 12.2s；prefetch=4（临时 inj@tl，唯一同队列消费者）：`LLEN=0, reserved=9, max_active=3`，排空 12.1s。**同时执行恒被 `-c` 硬顶**；被放大的是**未 ack 预取占用**（预取发生在 worker 主进程，子进程不预取），总排空时间亦不变 | **措辞证伪、约束不变**：§0.5 重写为占用放大口径（危害①扩容副本饿死②崩溃后整批等 visibility timeout 重投③LLEN 监控失明）；`S0-3a` 注入段断言改 `LLEN==0 ∧ reserved==9 ∧ max_active==3`、正例段补对照 `LLEN>0 ∧ reserved≤3`；`docker-compose.yml` §0.5 注释同步；plan v0.12 |
 
 **顺带产出（工程实据，无设计变更）**：`celery inspect` 是**广播命令**——从任一在线节点发起都收齐全部 worker 应答，逐池核验只能按节点名判定、无法按容器隔离；inspect 的 JSON 开关是 `-j`（`-json` 非法——命令非零退出且 stdout 为空，S0-3a queues 段首跑全红的真因）。
+
+### 第八轮（2026-09-24）：S0-5 实据修订——版本基线
+
+S0-5 Step 1 首次 `makemigrations`（**全项目第一次真实连 PG**——S0-1~S0-3a 全程零库：spike 走 Redis、compose 依 §0.6a 不含 db、`migrate` 从未执行）即硬失败并 Hard Stop：Django 6.1.1 的 PG 后端在**建连时**对 14.x 抛 `NotSupportedError`。经产品确认按建议修订，本节为记录。设计约束（迁移表 31 边、任务表 101 条、四池拓扑、`--prefetch-multiplier=1`）**零触碰**。
+
+| # | 原假设 | 实据 | 处理 |
+|---|---|---|---|
+| F-8 | §0.6a 版本基线"≥14"——论据是"全部列示 PG 特性均属 9.x 时代、逐条核对 14 兼容" | 特性兼容结论本身为真，但**不完备**：框架另有与特性核对**正交**的连接层版本下限——`.venv/.../postgresql/features.py:10` `minimum_database_version = (15,)`，`base/base.py:196` 在 `init_connection_state` 强制校验，对本地 `14.23` 直接抛错、无 settings 可绕。"Django 6.1.1 × PG 14"组合在全部既有实证中从未同时出现（此前无任何任务触库），故钉版时未暴露 | 基线 **≥14→≥15**（下限改由框架硬约束驱动）；本机 MacPorts 装 `postgresql16-server@16.15` 并接管 5432（14 仅 launchd unload 保留回退，dev 库为空、重建零损失）；S0-8 断言 `server_version >= 15`；DoD 客户端路径 `psql14→psql16`；§6 第 7 条、`.env.example`、`base.py` 注释同步；plan v0.14 |
+
+**顺带产出（工程实据，无设计变更）**："逐特性核对兼容"不等于"可连接"——版本下限类缺陷只在**真建连**时暴露，依赖解析与 import 阶段全部无感；凡引入 ORM/DB 框架钉版，验收里至少要有一次真实 `migrate` 冒烟（本次由 S0-5 Step 1 自身兑现，未新增任务）。

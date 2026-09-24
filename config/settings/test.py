@@ -3,6 +3,8 @@ InMemory layer；ALWAYS_EAGER 仅限非并发用例——并发用例禁 eager�
 from .base import *  # noqa: F401,F403
 
 DEBUG = False
+# S0-5：测试口哈希降 MD5（PBKDF2 每哈希 ~0.5s，仅测登录协议非测密码学；生产不继承——base 无此项）
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

@@ -39,6 +39,10 @@ INSTALLED_APPS = [
     "apps.metrics",
 ]
 
+# S0-5（拍板①）：认证基座 = Django session + 本地密码（ModelBackend），username 标识；
+# SSO/ LDAP 属 M3 认证后端替换位——只换 backend，不动 User。
+AUTH_USER_MODEL = "core.User"
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -64,7 +68,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# §0.6a：本地/生产一律 PostgreSQL（≥14），SQLite 是禁区
+# §0.6a：本地/生产一律 PostgreSQL（≥15，F-8 起；Django 6.1.1 连接层硬下限），SQLite 是禁区
 DATABASES = {"default": env.db_url("DATABASE_URL")}
 
 # ---- Redis / Celery（§0.5 队列拓扑在 prod.py 路由与 compose 命令行落地）----
@@ -96,6 +100,10 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.core.exceptions.app_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.DefaultPagination",
     "PAGE_SIZE": 20,
+    # S0-5（拍板①）：仅 session 认证；BasicAuth 之类调试口子禁开（多一道匿名面=多一处回归红线）
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "TomatoLite Release Platform API",
