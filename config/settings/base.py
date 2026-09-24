@@ -28,7 +28,15 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "channels",
-    # apps/* 八个业务 app 由 S0-4 注册（§0.1），S0-3 不预建
+    # S0-4：八个业务 app 注册（§0.1 划分；channels_a/_b 避开 pip 包 channels 的 label 冲突）
+    "apps.core",
+    "apps.cmdb",
+    "apps.tickets",
+    "apps.channels_a",
+    "apps.channels_b",
+    "apps.verification",
+    "apps.feedback",
+    "apps.metrics",
 ]
 
 MIDDLEWARE = [
@@ -84,6 +92,10 @@ K8S_READER = env("K8S_READER")  # OQ-3: api | kubectl
 # ---- DRF / API 契约 ----
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # S0-4 基座三件套挂载：统一 envelope / 异常处理 / 分页（page_size=20 拍板默认）
+    "EXCEPTION_HANDLER": "apps.core.exceptions.app_exception_handler",
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.DefaultPagination",
+    "PAGE_SIZE": 20,
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "TomatoLite Release Platform API",

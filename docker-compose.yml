@@ -54,7 +54,7 @@ services:
     command: ["celery", "-A", "config", "worker", "-Q", "callback.process",
               "-n", "callback@tl", "--concurrency=8", "--loglevel=INFO"]
 
-  worker_runner:  # §0.5：--prefetch-multiplier=1 是硬约束（默认 4 会把并发 3 放大成 12）
+  worker_runner:  # §0.5：--prefetch-multiplier=1 是硬约束（默认 4 放大的是未 ack 预取**占用**而非并发——12 发×3 并发实测 LLEN=0、reserved=9、max_active=3，S0-3a 实据 F-7）
     <<: *app-base
     container_name: tl-worker-runner
     command: ["celery", "-A", "config", "worker", "-Q", "exec.runner",

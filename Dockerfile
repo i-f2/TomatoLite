@@ -3,7 +3,9 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-# 骨架只含 config/（§0.1）；apps/ integrations/ mocks/ 存在后随 S0-4 追加 COPY
+# S0-4：apps/ 落地（§0.1 八 app）；integrations/ 在 S0-4 Step 4 建，mocks/ 自 M1 起追加
 COPY manage.py ./
 COPY config/ ./config/
+COPY apps/ ./apps/
+COPY integrations/ ./integrations/
 EXPOSE 8000

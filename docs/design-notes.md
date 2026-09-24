@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 工程设计说明（Design Notes） |
-| 版本 | v0.7（设计评审稿） |
-| 日期 | 2026-09-23 |
+| 版本 | v0.8（设计评审稿） |
+| 日期 | 2026-09-24 |
 | 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
 | 配套文档 | `docs/implementation-plan.md`（实施进度总表） |
-| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`）。v0.7 = 第六轮（§7）：**S0-2 spike 实据修订 §2.3/§2.4**（F-6：channel layer 无尺寸兜底，excerpt + 帧字节预算双护栏落为应用层自有责任），迁移表 31 边两版均不动 |
+| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`）。v0.7 = 第六轮（§7）：**S0-2 spike 实据修订 §2.3/§2.4**（F-6：channel layer 无尺寸兜底，excerpt + 帧字节预算双护栏落为应用层自有责任），迁移表 31 边两版均不动。v0.8 = 第七轮（§7）：**§0.5 措辞按 S0-3a 拓扑断言实据修订**（F-7：prefetch 放大的是未 ack 预取**占用**条数、非同时执行数——`-c` 硬顶与 `--prefetch-multiplier=1` 硬约束均不变），迁移表 31 边仍零触碰 |
 
 ---
 
@@ -108,7 +108,7 @@ TomatoLite/
 | `verify.runner` | `worker_verify` | 4 | 独立池，防止验证被 ansible 队列饿死 |
 | `sweeper` / `notify` / `default` | `worker_default` | 4 | **beat 必须单实例**，否则 sweeper 双发 |
 
-**`--prefetch-multiplier` 默认是 4**：一个 prefork 子进程会一次性预取 4 个任务。表现为"配置的并发上限是 3，实际同时跑了 12 个 playbook"。这是最容易被忽略、又最难排查的一条——因为配置看起来完全正确。
+**`--prefetch-multiplier` 默认是 4**：worker **主进程**会一次性预取并持有（未 ack）至多 `并发数 × 4` 条消息。放大的是**占用条数，不是并发数**——同时执行数恒被 `-c` 硬顶在配置上限（S0-3a 实据 F-7，§7 第七轮；旧措辞"实际同时跑了 12 个"已证伪）。失效形态：队列瞬间见底（`LLEN=0`）而多数任务躺在单 worker 的预留表里——① 横向扩容后新副本被饿死（消息早被揽走）；② worker 崩溃后整批未 ack 消息须等 visibility timeout 才重投；③ 队列积压监控失明（`LLEN` 恒 0）。`--prefetch-multiplier=1` 仍为**硬约束**——这是最容易被忽略、又最难排查的一条，因为配置看起来完全正确。
 
 ### 0.6 Settings 分片
 
@@ -1422,3 +1422,13 @@ S0-2 spike（`docs/spikes/s0-2/report.md`）在真实栈（celery 5.6.3 prefork 
 | F-6 | channel layer 按 `max_message_size`（≈60KB）兜底超限消息，"分层"护栏有第二道闸 | channels_redis 4.3.0 `RedisChannelLayer` **无任何消息尺寸上限**：200KB `group_send` 不 raise、不截断，订阅者原样收讫；无 `max_message_size` 属性；无订阅者时静默成功 | **证伪**。尺寸自限全落应用层双护栏：① 归一化 `stdout_excerpt_bytes`（默认 4KB，超限截断 + `truncated=True`）② 批帧 `ws_batch_max_bytes`（默认 256KB，与 500ms/200 条并列、先到者触发，Consumer 出口同闸）。§2.3 图 + 要点、§2.4② 同步落地；`M1-15` DoD 加"注入 1MB stdout 单事件断言 excerpt≤4KB 且单帧≤256KB"、`X-04` 加"截断标记必显" |
 
 **顺带产出（工程实据，无设计变更，已列 S0-3 移交清单）**：`run_async` 返回 `(thread, Runner)` 二元组；channels 4.3 `new_channel()` 为协程；macOS+py3.12+celery5.6 prefork 需 `FORKED_BY_MULTIPROCESSING=1`（Linux 复现与否列为 S0-3 断言）；`Thread` 子类禁占 `_stop` 私有名；`group_send` 无订阅者静默 = fire-and-forget，与 §2.3 失败策略表"Persister 不感知前端在离"的既有立场一致，不改。
+
+### 第七轮（2026-09-24）：S0-3a 拓扑断言实据修订
+
+S0-3a Step 2（故障注入段）首跑：正例绿（12×3s → `max_active==3`），注入段按原 Spec 口径 `max_active>3` **证伪**——同队列唯一消费者下该值物理上不可能越过 `-c`。经 Hard Stop 呈报 + 产品拍板"按建议"，以独立修订 Spec 落地。设计约束（`--prefetch-multiplier=1`、四池拆分、beat 单实例）**零变更**；迁移表 31 边零触碰。
+
+| # | 原假设 | 实据（取证：一次性 A/B 对照，2026-09-24，12×3s、t≈1.5s 采样；口径已固化于 `scripts/s0_3a_topology_check.py`） | 处理 |
+|---|---|---|---|
+| F-7 | §0.5：「一个 prefork 子进程会一次性预取 4 个任务；并发上限 3 实际同时跑 12 个」——即 prefetch 放大**同时执行数** | prefetch=1（正常 runner）：`LLEN=6, reserved=3, max_active=3`，排空 12.2s；prefetch=4（临时 inj@tl，唯一同队列消费者）：`LLEN=0, reserved=9, max_active=3`，排空 12.1s。**同时执行恒被 `-c` 硬顶**；被放大的是**未 ack 预取占用**（预取发生在 worker 主进程，子进程不预取），总排空时间亦不变 | **措辞证伪、约束不变**：§0.5 重写为占用放大口径（危害①扩容副本饿死②崩溃后整批等 visibility timeout 重投③LLEN 监控失明）；`S0-3a` 注入段断言改 `LLEN==0 ∧ reserved==9 ∧ max_active==3`、正例段补对照 `LLEN>0 ∧ reserved≤3`；`docker-compose.yml` §0.5 注释同步；plan v0.12 |
+
+**顺带产出（工程实据，无设计变更）**：`celery inspect` 是**广播命令**——从任一在线节点发起都收齐全部 worker 应答，逐池核验只能按节点名判定、无法按容器隔离；inspect 的 JSON 开关是 `-j`（`-json` 非法——命令非零退出且 stdout 为空，S0-3a queues 段首跑全红的真因）。

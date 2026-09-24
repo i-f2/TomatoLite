@@ -13,3 +13,5 @@ redis==8.1.0
 psycopg[binary]==3.3.6
 pytest==9.1.1
 pytest-django==4.14.0
+# S0-4：integrations/ 钦定 HTTP 库（§0.2 规则 1"只准 httpx + 标准库"的兑现件）
+httpx==0.28.1
