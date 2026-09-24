@@ -1,0 +1,13 @@
+---
+# S0-1 spike Q7：事件速率压测（约 5000 条 runner_on_ok）
+- name: S0-1 stress play
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    stress_items: 5000
+  tasks:
+    - name: S1 debug loop {{ stress_items }} items
+      ansible.builtin.debug:
+        msg: "n={{ item }}"
+      loop: "{{ range(0, stress_items | int) | list }}"

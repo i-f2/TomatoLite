@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- S0-2 人工观察补充（DoD"浏览器实时逐行"）：driver --manual 起服务后打开本页 -->
+<meta charset="utf-8">
+<title>TomatoLite S0-2 事件流 demo</title>
+<style>body{font:13px/1.5 ui-monospace,monospace;background:#101418;color:#d6e2ec;margin:12px}
+.b{color:#7fd1a0}.s{color:#f6c177}.w{color:#e5636f}</style>
+<div id="status">connecting…</div>
+<pre id="log"></pre>
+<script>
+const log = document.getElementById('log'), st = document.getElementById('status');
+let ws, n = 0;
+function connect(){
+  ws = new WebSocket('ws://127.0.0.1:8775/ws/run/demo1/');
+  ws.onopen = () => st.textContent = 'connected';
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data); n++;
+    const line = document.createElement('span');
+    line.className = m.type === 'run.stats' ? 's' : 'b';
+    line.textContent = `#${n} batch ${m.seq_from}→${m.seq_to} (${m.count})\n`;
+    log.appendChild(line); log.scrollTop = 1e9;
+  };
+  ws.onclose = () => { st.textContent = 'closed，1s 后重连'; setTimeout(connect, 1000); };
+}
+connect();
+</script>

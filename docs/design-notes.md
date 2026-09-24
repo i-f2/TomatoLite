@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 | 工程设计说明（Design Notes） |
-| 版本 | v0.6（设计评审稿） |
+| 版本 | v0.7（设计评审稿） |
 | 日期 | 2026-09-23 |
 | 上游依据 | `PRD.md` v1.0（含 ADR-6 ~ ADR-11） |
 | 配套文档 | `docs/implementation-plan.md`（实施进度总表） |
-| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`），迁移表 31 边不动 |
+| 状态 | 第二轮全文审计结论已全部落地（§7）；原 2 处留白（边 29 人工强制放行 / 边 30 事后回滚）**已由产品拍板开放**，迁移表定稿为 **31 条边 + 3 终态**——`SUCCESS` 不再是终态。v0.4 补入本地开发环境实况：§0.6a（本地 PG ≥14，非容器）/ §0.6b（临时真实实例联调栈）/ §6 第 7 条（双层环境分界线）。v0.5 = 第四轮开工前缺口盘查（§7）：**补录边 31 `TRIGGER_BUILD_LOST`**（§3.6 早已引用而漏登表）、修边 10 陈旧引用、`JenkinsProvider.abort` 闭环、边 25 落任务 `M2-34`。v0.6 = 第五轮（§7）：**S0-1 spike 实据修订 §2.1/§2.3**（F-1~F-5；RESCUED 改终态计数回填 ③′、白名单增补 `runner_item_on_*` 族、生产定死 `run_async()`）。v0.7 = 第六轮（§7）：**S0-2 spike 实据修订 §2.3/§2.4**（F-6：channel layer 无尺寸兜底，excerpt + 帧字节预算双护栏落为应用层自有责任），迁移表 31 边两版均不动 |
 
 ---
 
@@ -553,9 +553,11 @@ ansible-runner (子进程, 输出 JSON event)
    │                     S0-1 实据：同步 run() 下回调在调用线程本身——见 F-1)
    ▼
 EventPump._on_event(event)                      [apps/channels_b/runner/pump.py]
-   │  归一化为 RunEvent(seq, kind, host, task, status, changed, duration_ms, stdout, stderr)
+   │  归一化为 RunEvent(seq, kind, host, task, status, changed, duration_ms, stdout, stderr, truncated)
    │    seq←payload.counter(全局单调)  duration_ms←event_data.duration×1000(item 行 NULL, F-5)
    │    stderr 列：事件 payload 无独立字段，从 res.msg/exception + stdout(剥 ANSI) 提取 (F-4)
+   │    stdout/stderr excerpt：超 stdout_excerpt_bytes(默认 4KB) 即截断并置 truncated=True——
+   │    **全链路无第二道尺寸防线(F-6)**，全文只靠 job_events 懒加载(§2.4①)
    │  白名单 kind（v0.6 按 S0-1 实据增补末族）：playbook_on_task_start / runner_on_start /
    │  runner_on_ok / runner_on_failed / runner_on_unreachable / runner_on_skipped /
    │  playbook_on_stats / runner_item_on_ok / runner_item_on_failed|skipped|unreachable
@@ -569,8 +571,9 @@ EventPump._on_event(event)                      [apps/channels_b/runner/pump.py]
           ├─ 批量 upsert AnsibleTaskResult
           │    bulk_create(update_conflicts=True,
           │                unique_fields=["run","host_name","task_uuid","item_idx"])
-          ├─ 每 500ms / 200 事件 / 终态事件 触发 flush，单事务批量写
-          └─ async_to_sync(channel_layer.group_send)("tl.run.{uuid}", ...)
+          ├─ 每 500ms / 200 事件 / ws_batch_max_bytes(默认 256KB) / 终态事件
+          │    触发 flush——**先到者触发，单事务批量写**（字节预算=F-6 实据新增）
+          └─ async_to_sync(channel_layer.group_send)("tl.run.{uuid}", 批帧)
                     │
                     ▼
         RunLogConsumer (AsyncJsonWebsocketConsumer) → 浏览器
@@ -582,6 +585,7 @@ EventPump._on_event(event)                      [apps/channels_b/runner/pump.py]
 - Django 连接是线程局部的：Persister 线程必须自己 `close_old_connections()`，且**不能是 daemon 线程**（否则主任务结束时正在 flush 的批次被丢）。终态事件必须同步 flush 并 `join(timeout=5)`。
 - group 名 `tl.run.{uuid}`：Channels 组名限 ASCII 字母数字与 `-_.`、长度 ≤100。用 int id 拼容易踩长度/字符问题。
 - **权限门禁在 `connect()`。** Channels group 无访问控制，任何人猜到组名即可订阅。`connect` 内必须校验用户对 ticket 的可见性——否则任何人都能看生产发布日志。
+- **消息尺寸是应用层的自有责任（F-6 实据，S0-2）。** channel layer 不兜底：`group_send` 无上限、不截断、不报错，无订阅者时同样静默成功（fire-and-forget 立场不变，Persister 无需感知前端在离）。因此 `stdout_excerpt_bytes`（单事件）与 `ws_batch_max_bytes`（单帧）是仅有的两道闸——**缺一道，最坏情形 = 200 条全量 stdout ≈ MB 级单帧直贯 Redis→daphne→浏览器**。两道闸在 Consumer 出口同样生效（§2.4②）。
 
 **RESCUED 的终态计数回填（2026-09-23 拍板，方案 ③′；S0-1 实据 F-3）**
 
@@ -606,6 +610,7 @@ S0-1 spike 证明：被 `rescue` 挽回的 `runner_on_failed` 事件**不带任�
 | F-3 | RESCUED 可由事件流判出 | 事件级无标志，**证伪** → 终态计数回填方案 ③′ | 上两块 |
 | F-4 | RunEvent 有 stderr | payload 无独立字段，错误文本混在 stdout(ANSI) 与 `res.msg/exception` | 上图归一化行 |
 | F-5 | item 行有 duration | item 事件 `event_data.duration=None` | §2.1 模型注 + 上图 |
+| F-6 | channel layer 有 `max_message_size`(≈60KB) 兜底超限消息 | **证伪**：channels_redis 4.3.0 无任何尺寸上限，200KB 经 `group_send` 原样投递、无订阅者时亦静默成功（`docs/spikes/s0-2/report.md` E1） | 尺寸自限全落应用层双护栏：归一化 excerpt + 帧字节预算（上图两行 + §2.4②） |
 
 补充实据（非假设修订）：事件↔`job_events/<counter>-<uuid>.json` 严格 1:1、counter 可作 `seq`；事件级自带 `stdout` 全文（§2.4① 懒加载成立且强于假设）；速率实测 ≈550 ev/s 无反压（Q7）；`cancel_callback` 正常跑完亦被调用 2~3 次（周期轮询，**不能以被调用当取消**，S0-2 起取消标志必须显式置位）。
 
@@ -625,7 +630,7 @@ S0-1 spike 证明：被 `rescue` 挽回的 `runner_on_failed` 事件**不带任�
 不做这三层，200 主机场景下 WebSocket 必崩：
 
 1. **分层**：WS 只承载"task × host 状态迁移"这类结构化事件；`runner_on_ok` 的完整 stdout 走 artifact 文件（`artifact_dir/job_events/*.json`），UI 点击某行时用 `GET /tickets/{id}/logs?task_uuid=...&offset=` 懒加载。
-2. **合并**：Consumer 侧 `LogCoalescer` 缓冲 50 行 / 100ms 合成一帧（`{"type":"batch","items":[...]}`）。逐行 `send()` 会打爆 WebSocket，并顺带打爆 daphne 的 CPU。
+2. **合并**：Consumer 侧 `LogCoalescer` 缓冲 50 行 / 100ms / `ws_batch_max_bytes` 合成一帧（`{"type":"batch","items":[...]}`，**三条件先到者发帧**，字节预算系 F-6 实据新增）。逐行 `send()` 会打爆 WebSocket，并顺带打爆 daphne 的 CPU。`truncated=True` 的行必须在帧里带着标记到端，前端据此显示"内容已截断"，不得呈现为全文（X-04）。
 3. **限流 + 丢弃策略**：每 run `max_lines_per_second`（默认 200），超出后只发 `{"dropped": N, "last_seq": M}` 计数帧。Redis list 有 5000 条上限，前端重连时带 `last_seq` 请求补发（`GET /runs/{id}/events?since=`）。
 
    **但环形缓冲会被追尾，此时"补发"是假的。** 客户端离线超过 5000 条事件后，它要的 `since` 已被 `LTRIM` 裁掉，服务端只能返回手上还留着的——**前端会静默显示一段有洞的日志，用户以为看到了全部**。这与"保证不瞎"正相反，且因为日志看起来连续，没有任何人会去怀疑它。
@@ -1407,3 +1412,13 @@ def evaluate(run: VerificationRun) -> Conclusion:
 | F-5 | item 行有 duration | item 事件 `duration=None` | §2.1 `duration_ms` item 行允许 NULL |
 
 **顺带产出（无需设计变更，但改变了 S0-2/M1 的已知边界）**：`seq` 可直接复用 `counter`（严格单调 1:1）；事件级自带 stdout 全文，§2.4① 懒加载成立且强于假设；速率 ≈550 ev/s 无反压；`cancel_callback` 在正常跑完时也被周期调用（**取消判定必须显式置标志位**，已列 S0-2 交接清单）；黑洞主机 unreachable 实测 10.03s（`ConnectTimeout=3` 被 ssh 重试放大到 ~10s）——超时预算按 ≥10s/主机 设。
+
+### 第六轮（2026-09-23）：S0-2 spike 实据修订
+
+S0-2 spike（`docs/spikes/s0-2/report.md`）在真实栈（celery 5.6.3 prefork + channels_redis 4.3.0 + daphne + redis 7）上复跑 §2.3 全链路：SQ1/SQ3~SQ7 六项**全部与设计相符**（5006 事件端到端零丢、28 批帧保序、取消/收口两路皆验），唯 SQ2 证伪一项隐含假设。经 Hard Stop 呈报 + 产品拍板"按建议"修订。迁移表 31 边零触碰。
+
+| # | 原假设 | 实据（证据见 report E1） | 处理 |
+|---|---|---|---|
+| F-6 | channel layer 按 `max_message_size`（≈60KB）兜底超限消息，"分层"护栏有第二道闸 | channels_redis 4.3.0 `RedisChannelLayer` **无任何消息尺寸上限**：200KB `group_send` 不 raise、不截断，订阅者原样收讫；无 `max_message_size` 属性；无订阅者时静默成功 | **证伪**。尺寸自限全落应用层双护栏：① 归一化 `stdout_excerpt_bytes`（默认 4KB，超限截断 + `truncated=True`）② 批帧 `ws_batch_max_bytes`（默认 256KB，与 500ms/200 条并列、先到者触发，Consumer 出口同闸）。§2.3 图 + 要点、§2.4② 同步落地；`M1-15` DoD 加"注入 1MB stdout 单事件断言 excerpt≤4KB 且单帧≤256KB"、`X-04` 加"截断标记必显" |
+
+**顺带产出（工程实据，无设计变更，已列 S0-3 移交清单）**：`run_async` 返回 `(thread, Runner)` 二元组；channels 4.3 `new_channel()` 为协程；macOS+py3.12+celery5.6 prefork 需 `FORKED_BY_MULTIPROCESSING=1`（Linux 复现与否列为 S0-3 断言）；`Thread` 子类禁占 `_stop` 私有名；`group_send` 无订阅者静默 = fire-and-forget，与 §2.3 失败策略表"Persister 不感知前端在离"的既有立场一致，不改。
