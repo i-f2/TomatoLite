@@ -21,11 +21,19 @@ DEBUG = False
 ALLOWED_HOSTS: list[str] = []
 
 INSTALLED_APPS = [
+    # M1-01：DoD"Admin 可增删改查"的载体。admin 置于首位的惯例理由=模板覆盖优先级；
+    # 其依赖（auth/contenttypes/sessions/messages + Authentication/Messages 中间件 +
+    # APP_DIRS 模板 + auth/messages 上下文处理器）在本片**均已就位**，无需另加。
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # M1-01：ArrayField（cmdb_app.log_error_keywords / cmdb_host.tags）的前置 app。
+    # 它无模型、无自带迁移、无运行时副作用；装上后 PG 专属能力（数组算子 / CIText / trigram）
+    # 才可用——M1-03 命名规范校验（同义混名）的可能落点。
+    "django.contrib.postgres",
     "rest_framework",
     "drf_spectacular",
     "channels",
